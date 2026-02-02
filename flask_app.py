@@ -17,27 +17,33 @@ def generar():
         rfc = request.form.get('rfc', '').upper().strip()
         idcif = request.form.get('idcif', '').strip()
         
-        # Generamos una IP mexicana aleatoria para la máscara
-        fake_ip = f"187.{random.randint(128,255)}.{random.randint(0,255)}.{random.randint(1,254)}"
+        if not rfc or not idcif:
+            return jsonify({"message": "Datos incompletos"}), 400
 
-        # URL directa del PDF
+        # ESTRATEGIA DE BYPASS 2026:
+        # El SAT bloquea IPs de centros de datos. Usamos una IP aleatoria de México
+        # en las cabeceras para simular un origen residencial (Infinitum/Totalplay).
+        mexico_ip = f"187.{random.randint(128,255)}.{random.randint(0,255)}.{random.randint(1,254)}"
+        
         url = f"https://sinat.sat.gob.mx/CifDirecto/Home/Index?rfc={rfc}&idCif={idcif}"
         
-        # Esta es la máscara técnica (Headers de Enmascaramiento)
         headers = {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
-            'X-Forwarded-For': fake_ip,  # Aquí fingimos la IP
-            'Client-IP': fake_ip,         # Otra capa de máscara
-            'X-Real-IP': fake_ip,         # Y una más por si acaso
-            'Referer': 'https://www.sat.gob.mx/',
+            'Accept': 'application/pdf,application/xhtml+xml,text/html;q=0.9,*/*;q=0.8',
             'Accept-Language': 'es-MX,es;q=0.9',
+            'X-Forwarded-For': mexico_ip, # BYPASS: Máscara de IP mexicana
+            'Client-IP': mexico_ip,        # BYPASS: Refuerzo de máscara
+            'Referer': 'https://www.sat.gob.mx/consultas/31014/imprime-tu-cedula-de-identificacion-fiscal',
+            'Sec-Fetch-Site': 'same-site',
+            'Sec-Fetch-Mode': 'navigate',
+            'Sec-Fetch-Dest': 'document',
             'Connection': 'close'
         }
 
-        # Petición al SAT con la máscara puesta
-        # 'stream=True' para que la descarga sea más fluida y no pese en Vercel
-        response = requests.get(url, headers=headers, timeout=20, verify=False, stream=True)
+        # Realizamos la petición. 'stream=True' evita que Vercel mate la función por peso.
+        response = requests.get(url, headers=headers, timeout=25, verify=False, stream=True)
 
+        # Si el SAT responde con un PDF (aunque digan que el endpoint no funciona, lo hace)
         if response.status_code == 200 and b'%PDF' in response.content:
             return send_file(
                 io.BytesIO(response.content),
@@ -45,9 +51,11 @@ def generar():
                 as_attachment=True,
                 download_name=f"CSF_{rfc}.pdf"
             )
-            
-        return jsonify({"message": "El SAT detectó la conexión pero negó el archivo. Intenta de nuevo."}), 404
+        
+        # Si llegamos aquí, el bypass fue detectado por la IP de Vercel
+        return jsonify({"message": "Bypass detectado por el SAT. Reintenta en 3 segundos."}), 403
 
     except Exception as e:
-        return jsonify({"message": "Error de enlace enmascarado. Reintenta."}), 500
-            
+        print(f"Error en bypass: {str(e)}")
+        return jsonify({"message": "Error de comunicación Ninja. Reintenta."}), 500
+        
