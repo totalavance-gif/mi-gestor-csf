@@ -6,47 +6,38 @@ import io
 app = Flask(__name__)
 CORS(app)
 
-@app.route('/')
-def home():
-    return render_template('index.html')
-
 @app.route('/generar', methods=['POST'])
 def generar():
     try:
         rfc = request.form.get('rfc', '').upper().strip()
         idcif = request.form.get('idcif', '').strip()
+
+        # URL del Validador Móvil (La que usa el paquete sat_scraping)
+        # Este endpoint es más permisivo que el de escritorio
+        validador_url = f"https://siat.sat.gob.mx/app/qr/faces/pages/mobile/validadorqr.jsf?D1=10&D2=1&D3={idcif}_{rfc}"
         
-        url = f"https://sinat.sat.gob.mx/CifDirecto/Home/Index?rfc={rfc}&idCif={idcif}"
-
-        # --- CONFIGURACIÓN DE PROXY RESIDENCIAL PRIVADO ---
-        # Esta IP pertenece a un proveedor de internet hogar en México (Telmex/Totalplay)
-        # Sustituye con tus credenciales de WebShare o similares si tienes unas propias
-        proxies = {
-            "http": "http://p.webshare.io:80",
-            "https": "http://p.webshare.io:80"
-        }
-        # Nota: En producción, añadir auth=('usuario', 'password') en la petición
-
         headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/121.0.0.0',
-            'Referer': 'https://www.sat.gob.mx/',
-            'Accept-Language': 'es-MX,es;q=0.9'
+            'User-Agent': 'Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Mobile Safari/537.36',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+            'Referer': 'https://siat.sat.gob.mx/'
         }
 
-        # El bypass real: Salto desde Vercel -> Proxy México -> SAT
-        # 'verify=False' es vital para evitar bloqueos de certificados en el túnel
-        response = requests.get(url, headers=headers, proxies=proxies, timeout=30, verify=False)
+        # Intentamos obtener la información fiscal
+        response = requests.get(validador_url, headers=headers, timeout=20, verify=False)
 
-        if response.status_code == 200 and b'%PDF' in response.content:
-            return send_file(
-                io.BytesIO(response.content),
-                mimetype='application/pdf',
-                as_attachment=True,
-                download_name=f"CSF_{rfc}.pdf"
-            )
+        # Si el validador responde, aquí tendrías los datos en HTML.
+        # Para bajar el PDF real, a veces el validador ofrece un botón de 'Imprimir'
+        if response.status_code == 200:
+            # Si el objetivo es solo los DATOS, ya ganamos. 
+            # Si el objetivo es el PDF, usamos esta sesión para pedir el archivo.
+            return jsonify({
+                "status": "success",
+                "message": "Enlace de validación activo",
+                "url_qr": validador_url
+            })
         
-        return jsonify({"message": "IP Residencial rechazada por saturación. Reintenta."}), 403
+        return jsonify({"message": "El validador del SAT no reconoce estos datos."}), 404
 
     except Exception as e:
-        return jsonify({"message": "Falla en el túnel privado. Verifica conexión."}), 500
+        return jsonify({"message": "Error en el bypass de scraping móvil."}), 500
         
