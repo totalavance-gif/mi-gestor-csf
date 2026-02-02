@@ -1,17 +1,21 @@
-from flask import Flask, request, send_file, render_template
-from fpdf import FPDF
-import io
-from bs4 import BeautifulSoup
+from flask import Flask, request, jsonify, render_template
+from flask_cors import CORS
 import requests
+from bs4 import BeautifulSoup
+import urllib3
 import ssl
 
-app = Flask(__name__)
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
-# Reutilizamos el adaptador SSL que ya sabemos que funciona para entrar al SAT
+app = Flask(__name__)
+CORS(app)
+
+# Bypass de Seguridad SSL para el SAT
 class SSLAdapter(requests.adapters.HTTPAdapter):
     def init_poolmanager(self, *args, **kwargs):
         ctx = ssl.create_default_context()
         ctx.set_ciphers('DEFAULT@SECLEVEL=1')
+        ctx.check_hostname = False
         kwargs['ssl_context'] = ctx
         return super(SSLAdapter, self).init_poolmanager(*args, **kwargs)
 
@@ -25,48 +29,42 @@ def generar():
         rfc = request.form.get('rfc', '').upper().strip()
         idcif = request.form.get('idcif', '').strip()
 
-        # 1. Extracción de datos (Lo que ya lograste hacer)
+        # URL del validador móvil (la más estable que encontramos)
         validador_url = f"https://siat.sat.gob.mx/app/qr/faces/pages/mobile/validadorqr.jsf?D1=10&D2=1&D3={idcif}_{rfc}"
+        
         session = requests.Session()
         session.mount('https://', SSLAdapter())
-        res = session.get(validador_url, timeout=20, verify=False)
-        
-        soup = BeautifulSoup(res.text, 'html.parser')
-        datos = {cols[0].text.strip(): cols[1].text.strip() for row in soup.find_all('tr') if (cols := row.find_all('td'))}
 
-        if not datos:
-            return "No se encontraron datos", 404
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Linux; Android 10) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Mobile Safari/537.36'
+        }
 
-        # 2. Creación del PDF con los datos obtenidos
-        pdf = FPDF()
-        pdf.add_page()
-        pdf.set_font("Arial", "B", 16)
-        pdf.cell(0, 10, "Constancia de Situación Fiscal (Resumen)", ln=True, align='C')
-        pdf.ln(10)
-        
-        pdf.set_font("Arial", "", 12)
-        for clave, valor in datos.items():
-            pdf.set_font("Arial", "B", 11)
-            pdf.cell(50, 8, f"{clave}", border=0)
-            pdf.set_font("Arial", "", 11)
-            pdf.cell(0, 8, f": {valor}", border=0, ln=True)
-        
-        pdf.ln(20)
-        pdf.set_font("Arial", "I", 8)
-        pdf.cell(0, 10, "Documento generado mediante validación de código QR oficial del SAT.", align='C')
+        # Realizamos el scraping de datos
+        response = session.get(validador_url, headers=headers, timeout=20, verify=False)
 
-        # 3. Enviar el PDF al usuario
-        pdf_output = io.BytesIO()
-        pdf_output.write(pdf.output())
-        pdf_output.seek(0)
+        if response.status_code == 200:
+            soup = BeautifulSoup(response.text, 'html.parser')
+            datos_extraidos = {}
+            
+            # Buscamos todas las tablas de datos fiscales en el HTML
+            for row in soup.find_all('tr'):
+                cols = row.find_all('td')
+                if len(cols) >= 2:
+                    llave = cols[0].text.strip().replace(':', '')
+                    valor = cols[1].text.strip()
+                    if llave and valor:
+                        datos_extraidos[llave] = valor
 
-        return send_file(
-            pdf_output,
-            mimetype='application/pdf',
-            as_attachment=True,
-            download_name=f"CSF_{rfc}.pdf"
-        )
+            if not datos_extraidos:
+                return jsonify({"message": "Se entró al SAT pero la tabla está vacía. Verifica ID CIF."}), 404
+
+            return jsonify({
+                "status": "success",
+                "data": datos_extraidos
+            })
+
+        return jsonify({"message": "El SAT no respondió a la consulta de datos."}), 503
 
     except Exception as e:
-        return str(e), 500
+        return jsonify({"message": f"Falla en extracción: {str(e)}"}), 500
         
