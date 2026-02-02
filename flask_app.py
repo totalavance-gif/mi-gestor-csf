@@ -7,6 +7,7 @@ import ssl
 
 app = Flask(__name__)
 
+# Reutilizamos el adaptador SSL que ya sabemos que funciona para entrar al SAT
 class SSLAdapter(requests.adapters.HTTPAdapter):
     def init_poolmanager(self, *args, **kwargs):
         ctx = ssl.create_default_context()
@@ -14,54 +15,47 @@ class SSLAdapter(requests.adapters.HTTPAdapter):
         kwargs['ssl_context'] = ctx
         return super(SSLAdapter, self).init_poolmanager(*args, **kwargs)
 
+@app.route('/')
+def home():
+    return render_template('index.html')
+
 @app.route('/generar', methods=['POST'])
 def generar():
     try:
-        rfc_user = request.form.get('rfc', '').upper().strip()
+        rfc = request.form.get('rfc', '').upper().strip()
         idcif = request.form.get('idcif', '').strip()
 
-        # 1. Extracción de datos (El Bypass que ya funciona)
-        validador_url = f"https://siat.sat.gob.mx/app/qr/faces/pages/mobile/validadorqr.jsf?D1=10&D2=1&D3={idcif}_{rfc_user}"
+        # 1. Extracción de datos (Lo que ya lograste hacer)
+        validador_url = f"https://siat.sat.gob.mx/app/qr/faces/pages/mobile/validadorqr.jsf?D1=10&D2=1&D3={idcif}_{rfc}"
         session = requests.Session()
         session.mount('https://', SSLAdapter())
         res = session.get(validador_url, timeout=20, verify=False)
         
         soup = BeautifulSoup(res.text, 'html.parser')
-        datos = {cols[0].text.strip().replace(':', ''): cols[1].text.strip() for row in soup.find_all('tr') if (cols := row.find_all('td'))}
+        datos = {cols[0].text.strip(): cols[1].text.strip() for row in soup.find_all('tr') if (cols := row.find_all('td'))}
 
         if not datos:
-            return "No se pudieron obtener los datos para generar el PDF", 404
+            return "No se encontraron datos", 404
 
-        # 2. Reconstrucción del PDF (Diseño Constancia)
+        # 2. Creación del PDF con los datos obtenidos
         pdf = FPDF()
         pdf.add_page()
-        
-        # Encabezado (Simulando el logo del SAT/Hacienda con texto o podrías subir una imagen a tu repo)
-        pdf.set_font("Helvetica", "B", 14)
-        pdf.cell(0, 10, "SECRETARÍA DE HACIENDA Y CRÉDITO PÚBLICO", ln=True, align='L')
-        pdf.set_font("Helvetica", "B", 12)
-        pdf.cell(0, 7, "SERVICIO DE ADMINISTRACIÓN TRIBUTARIA", ln=True, align='L')
-        pdf.cell(0, 7, "CONSTANCIA DE SITUACIÓN FISCAL", ln=True, align='C')
+        pdf.set_font("Arial", "B", 16)
+        pdf.cell(0, 10, "Constancia de Situación Fiscal (Resumen)", ln=True, align='C')
         pdf.ln(10)
-
-        # Cuerpo de la Constancia (Formato de tabla de 2 columnas)
-        pdf.set_fill_color(240, 240, 240)
-        pdf.set_font("Helvetica", "B", 10)
-        pdf.cell(0, 8, "DATOS DE IDENTIFICACIÓN DEL CONTRIBUYENTE", ln=True, fill=True)
-        pdf.ln(2)
-
-        pdf.set_font("Helvetica", "", 9)
+        
+        pdf.set_font("Arial", "", 12)
         for clave, valor in datos.items():
-            pdf.set_font("Helvetica", "B", 9)
-            pdf.cell(60, 7, f"{clave}:", border='B')
-            pdf.set_font("Helvetica", "", 9)
-            pdf.cell(0, 7, f" {valor}", border='B', ln=True)
+            pdf.set_font("Arial", "B", 11)
+            pdf.cell(50, 8, f"{clave}", border=0)
+            pdf.set_font("Arial", "", 11)
+            pdf.cell(0, 8, f": {valor}", border=0, ln=True)
         
-        pdf.ln(10)
-        pdf.set_font("Helvetica", "I", 8)
-        pdf.multi_cell(0, 5, "La información contenida en este documento ha sido validada en tiempo real a través del portal oficial del SAT (SIAT) mediante la consulta del ID CIF proporcionado.")
+        pdf.ln(20)
+        pdf.set_font("Arial", "I", 8)
+        pdf.cell(0, 10, "Documento generado mediante validación de código QR oficial del SAT.", align='C')
 
-        # 3. Entrega del archivo
+        # 3. Enviar el PDF al usuario
         pdf_output = io.BytesIO()
         pdf_output.write(pdf.output())
         pdf_output.seek(0)
@@ -70,9 +64,9 @@ def generar():
             pdf_output,
             mimetype='application/pdf',
             as_attachment=True,
-            download_name=f"Constancia_{rfc_user}.pdf"
+            download_name=f"CSF_{rfc}.pdf"
         )
 
     except Exception as e:
-        return f"Error al reconstruir la constancia: {str(e)}", 500
+        return str(e), 500
         
