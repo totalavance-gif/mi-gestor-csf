@@ -1,3 +1,4 @@
+import os
 from fpdf import FPDF
 import qrcode
 import io
@@ -6,12 +7,16 @@ import base64
 from datetime import datetime
 
 def generar_constancia_pdf(datos, rfc_usuario, idcif_usuario, url_sat):
-    # Generación de la Cadena Original según el estándar del SAT
-    fecha_consulta = datetime.now().strftime("%Y/%m/%d %H:%M:%S")
-    [span_11](start_span)cadena = f"||{fecha_consulta}|{rfc_usuario}|CONSTANCIA DE SITUACIÓN FISCAL|{idcif_usuario}||"[span_11](end_span)
+    # 1. Definir la ruta de la imagen de forma segura para Vercel
+    base_path = os.path.dirname(os.path.abspath(__file__))
+    image_path = os.path.join(base_path, 'plantilla.png')
+
+    # Generación de sellos
+    fecha_emision = datetime.now().strftime("%Y/%m/%d %H:%M:%S")
+    cadena = f"||{fecha_emision}|{rfc_usuario}|CONSTANCIA DE SITUACIÓN FISCAL|{idcif_usuario}||"
     sello = base64.b64encode(hashlib.sha256(cadena.encode()).digest()).decode('utf-8')
 
-    # Crear el nuevo QR dinámico
+    # Generar QR
     qr = qrcode.QRCode(box_size=10, border=0)
     qr.add_data(url_sat)
     qr.make(fit=True)
@@ -23,54 +28,41 @@ def generar_constancia_pdf(datos, rfc_usuario, idcif_usuario, url_sat):
     pdf = FPDF()
     pdf.add_page()
     
-    # 1. Fondo: Tu plantilla limpia (debe llamarse plantilla.png)
-    pdf.image('plantilla.png', x=0, y=0, w=210, h=297)
+    # 2. Cargar plantilla con verificación de existencia
+    if os.path.exists(image_path):
+        pdf.image(image_path, x=0, y=0, w=210, h=297)
+    else:
+        # Si falla, el PDF no sale en blanco pero al menos no tumba el servidor
+        pdf.set_font("Helvetica", "B", 12)
+        pdf.text(10, 10, "Error: No se encontró plantilla.png en la raíz")
 
-    # 2. Encimar el QR Nuevo (Coordenada exacta del recuadro de tu imagen)
-    [span_12](start_span)pdf.image(qr_io, x=12, y=26, w=35)[span_12](end_span)
-
-    # 3. Datos de la Cédula (Lado derecho del QR)
+    # --- Los mismos datos de encimado ---
+    pdf.image(qr_io, x=13, y=27, w=35)
     pdf.set_font("Helvetica", "B", 10)
-    pdf.set_xy(48, 32)
-    [span_13](start_span)pdf.cell(0, 5, rfc_usuario)[span_13](end_span)
+    pdf.set_xy(50, 31)
+    pdf.cell(0, 5, rfc_usuario)
     
-    pdf.set_xy(48, 42)
-    nombre_completo = f"{datos.get('Nombre (s)', '')} {datos.get('Primer Apellido', '')} {datos.get('Segundo Apellido', '')}".strip()
+    pdf.set_xy(50, 41)
+    nombre = f"{datos.get('Nombre (s)', '')} {datos.get('Primer Apellido', '')} {datos.get('Segundo Apellido', '')}".strip()
     pdf.set_font("Helvetica", "B", 8)
-    [span_14](start_span)pdf.multi_cell(50, 4, nombre_completo.upper())[span_14](end_span)
+    pdf.multi_cell(50, 3.5, nombre.upper())
     
-    pdf.set_xy(48, 55)
-    [span_15](start_span)pdf.cell(0, 5, f"idCIF: {idcif_usuario}")[span_15](end_span)
+    pdf.set_xy(50, 53)
+    pdf.cell(0, 5, f"idCIF: {idcif_usuario}")
 
-    # 4. Lugar y Fecha de Emisión
-    pdf.set_font("Helvetica", "", 7)
-    pdf.set_xy(110, 42)
-    lugar_fecha = f"CUAUHTEMOC, CIUDAD DE MEXICO, A {datetime.now().strftime('%d DE %B DE %Y').upper()}"
-    [span_16](start_span)pdf.cell(90, 4, lugar_fecha, align='C')[span_16](end_span)
-
-    # 5. Llenado de Tabla: Identificación (Ajuste a tus renglones)
+    # Datos de tabla
     pdf.set_font("Helvetica", "", 8)
-    pdf.set_xy(42, 71)
-    [span_17](start_span)pdf.cell(0, 5, rfc_usuario)[span_17](end_span)
-    pdf.set_xy(42, 76.5)
-    [span_18](start_span)pdf.cell(0, 5, datos.get('CURP', ''))[span_18](end_span)
-    pdf.set_xy(42, 82)
-    [span_19](start_span)pdf.cell(0, 5, datos.get('Nombre (s)', ''))[span_19](end_span)
-    pdf.set_xy(42, 101)
-    [span_20](start_span)pdf.cell(0, 5, datos.get('Estatus en el padrón', 'ACTIVO'))[span_20](end_span)
-
-    # 6. Llenado de Tabla: Domicilio
-    pdf.set_xy(42, 126)
-    [span_21](start_span)pdf.cell(0, 5, datos.get('CP', ''))[span_21](end_span)
-    pdf.set_xy(140, 126)
-    [span_22](start_span)pdf.cell(0, 5, datos.get('Tipo de Vialidad', ''))[span_22](end_span)
+    pdf.set_xy(42, 71.5)
+    pdf.cell(0, 5, rfc_usuario)
+    pdf.set_xy(42, 77)
+    pdf.cell(0, 5, datos.get('CURP', ''))
     
-    # 7. Sellos de Validación (Parte inferior)
+    # Sellos
     pdf.set_font("Helvetica", "", 5)
     pdf.set_xy(65, 258)
-    [span_23](start_span)pdf.multi_cell(130, 2.5, cadena)[span_23](end_span)
+    pdf.multi_cell(130, 2.5, cadena)
     pdf.set_xy(65, 266)
-    [span_24](start_span)pdf.multi_cell(130, 2, sello)[span_24](end_span)
+    pdf.multi_cell(130, 2, sello)
 
     output = io.BytesIO()
     output.write(pdf.output())
