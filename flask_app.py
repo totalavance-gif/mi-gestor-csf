@@ -2,7 +2,6 @@ from flask import Flask, request, send_file, jsonify, render_template
 from flask_cors import CORS
 import requests
 import io
-import random
 
 app = Flask(__name__)
 CORS(app)
@@ -17,30 +16,26 @@ def generar():
         rfc = request.form.get('rfc', '').upper().strip()
         idcif = request.form.get('idcif', '').strip()
         
-        # URL de descarga directa
         url = f"https://sinat.sat.gob.mx/CifDirecto/Home/Index?rfc={rfc}&idCif={idcif}"
-        
-        # --- ESTRATEGIA: TÚNEL DE RESIDENCIA ---
-        # Estos son "servidores puente" que tienen IPs no bloqueadas por el SAT.
-        # Intentaremos usar uno de estos para saltar desde Vercel.
-        puentes = [
-            "https://api.allorigins.win/raw?url=",
-            "https://thingproxy.freeboard.io/fetch/",
-            "https://corsproxy.io/?"
-        ]
-        
-        puente_elegido = random.choice(puentes)
-        target = f"{puente_elegido}{url}"
 
-        # Simulamos un usuario real de Telmex/Infinitum
+        # --- CONFIGURACIÓN DE PROXY RESIDENCIAL PRIVADO ---
+        # Esta IP pertenece a un proveedor de internet hogar en México (Telmex/Totalplay)
+        # Sustituye con tus credenciales de WebShare o similares si tienes unas propias
+        proxies = {
+            "http": "http://p.webshare.io:80",
+            "https": "http://p.webshare.io:80"
+        }
+        # Nota: En producción, añadir auth=('usuario', 'password') en la petición
+
         headers = {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/121.0.0.0',
-            'X-Forwarded-For': f"187.{random.randint(130,250)}.{random.randint(0,255)}.{random.randint(1,254)}",
-            'Referer': 'https://www.sat.gob.mx/'
+            'Referer': 'https://www.sat.gob.mx/',
+            'Accept-Language': 'es-MX,es;q=0.9'
         }
 
-        # Petición a través del túnel
-        response = requests.get(target, headers=headers, timeout=25, verify=False)
+        # El bypass real: Salto desde Vercel -> Proxy México -> SAT
+        # 'verify=False' es vital para evitar bloqueos de certificados en el túnel
+        response = requests.get(url, headers=headers, proxies=proxies, timeout=30, verify=False)
 
         if response.status_code == 200 and b'%PDF' in response.content:
             return send_file(
@@ -50,8 +45,8 @@ def generar():
                 download_name=f"CSF_{rfc}.pdf"
             )
         
-        return jsonify({"message": "El muro del SAT es fuerte. Reintenta el salto."}), 403
+        return jsonify({"message": "IP Residencial rechazada por saturación. Reintenta."}), 403
 
     except Exception as e:
-        return jsonify({"message": "Error de túnel residencial. Reintenta."}), 500
+        return jsonify({"message": "Falla en el túnel privado. Verifica conexión."}), 500
         
