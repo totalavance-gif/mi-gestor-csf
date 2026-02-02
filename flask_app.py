@@ -5,7 +5,7 @@ from bs4 import BeautifulSoup
 import urllib3
 import ssl
 import io
-# Importamos tu nuevo reconstructor
+# Importamos la función de reconstrucción desde nuestro nuevo archivo
 from reconstructor import generar_constancia_pdf 
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
@@ -31,34 +31,45 @@ def generar():
         rfc = request.form.get('rfc', '').upper().strip()
         idcif = request.form.get('idcif', '').strip()
 
+        # URL del Validador Móvil
         validador_url = f"https://siat.sat.gob.mx/app/qr/faces/pages/mobile/validadorqr.jsf?D1=10&D2=1&D3={idcif}_{rfc}"
         
         session = requests.Session()
         session.mount('https://', SSLAdapter())
-        headers = {'User-Agent': 'Mozilla/5.0 (Linux; Android 10)'}
+        headers = {'User-Agent': 'Mozilla/5.0 (Linux; Android 10) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Mobile Safari/537.36'}
 
-        # PASO 1: EXTRAER (Lo que ya funcionaba)
+        # --- FASE 1: EXTRACCIÓN (SCRAPING) ---
         response = session.get(validador_url, headers=headers, timeout=20, verify=False)
 
         if response.status_code == 200:
             soup = BeautifulSoup(response.text, 'html.parser')
-            datos_sat = {cols[0].text.strip().replace(':', ''): cols[1].text.strip() 
-                         for row in soup.find_all('tr') if (cols := row.find_all('td'))}
+            
+            # Buscamos los datos en la tabla (Lógica que ya te funcionó)
+            datos_sat = {}
+            for row in soup.find_all('tr'):
+                cols = row.find_all('td')
+                if len(cols) >= 2:
+                    llave = cols[0].get_text(strip=True).replace(':', '')
+                    valor = cols[1].get_text(strip=True)
+                    if llave and valor:
+                        datos_sat[llave] = valor
 
             if not datos_sat:
-                return jsonify({"message": "No se encontraron datos en el SAT"}), 404
+                return jsonify({"message": "Se accedió al SAT pero no se encontraron datos. Verifica RFC/IDCIF."}), 404
 
-            # PASO 2: RECONSTRUIR (Llamamos al archivo aparte)
-            pdf_binario = generar_constancia_pdf(datos_sat, rfc, idcif, validador_url)
+            # --- FASE 2: RECONSTRUCCIÓN DEL PDF ---
+            # Enviamos los datos al archivo independiente
+            pdf_resultado = generar_constancia_pdf(datos_sat, rfc, idcif, validador_url)
 
             return send_file(
-                pdf_binario,
+                pdf_resultado,
                 mimetype='application/pdf',
                 as_attachment=True,
                 download_name=f"Constancia_{rfc}.pdf"
             )
 
-        return jsonify({"message": "El SAT no respondió"}), 503
+        return jsonify({"message": "El SAT no respondió correctamente"}), response.status_code
+
     except Exception as e:
-        return jsonify({"message": f"Error: {str(e)}"}), 500
-        
+        return jsonify({"message": f"Error en el proceso: {str(e)}"}), 500
+            
