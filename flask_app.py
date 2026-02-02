@@ -1,4 +1,4 @@
-    from flask import Flask, request, send_file, jsonify, render_template
+from flask import Flask, request, send_file, jsonify, render_template
 from flask_cors import CORS
 import requests
 import io
@@ -12,34 +12,41 @@ def home():
 
 @app.route('/generar', methods=['POST'])
 def generar():
-    rfc = request.form.get('rfc', '').upper().strip()
-    idcif = request.form.get('idcif', '').strip()
-    
-    # URL del SAT
-    url = f"https://sinat.sat.gob.mx/CifDirecto/Home/Index?rfc={rfc}&idCif={idcif}"
-    
-    # OPCIÓN: Enmascarar a través de AllOrigins (Funciona como un escudo de IP)
-    # Esto hace que el SAT vea la IP de AllOrigins, no la de Vercel.
-    proxy_url = f"https://api.allorigins.win/raw?url={url}"
-
-    headers = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Firefox/122.0',
-        'Referer': 'https://www.sat.gob.mx/'
-    }
-
     try:
-        # Petición a través del "máscara"
-        res = requests.get(proxy_url, headers=headers, timeout=30)
+        rfc = request.form.get('rfc', '').upper().strip()
+        idcif = request.form.get('idcif', '').strip()
+        
+        if not rfc or not idcif:
+            return jsonify({"message": "Datos incompletos"}), 400
 
-        if res.status_code == 200 and b'%PDF' in res.content:
+        # URL directa
+        url = f"https://sinat.sat.gob.mx/CifDirecto/Home/Index?rfc={rfc}&idCif={idcif}"
+        
+        # Máscara de IP y Agente de Navegador Humano
+        # Cambiamos la IP cada vez que edites esto para 'limpiar' el rastro
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
+            'Accept': 'application/pdf, */*',
+            'X-Forwarded-For': '201.141.130.18', # IP de ejemplo mexicana
+            'Referer': 'https://www.sat.gob.mx/',
+            'Connection': 'close'
+        }
+
+        # Petición con tiempo de espera generoso (timeout) para evitar el crash de Vercel
+        response = requests.get(url, headers=headers, timeout=25, verify=False)
+
+        if response.status_code == 200 and b'%PDF' in response.content:
             return send_file(
-                io.BytesIO(res.content),
+                io.BytesIO(response.content),
                 mimetype='application/pdf',
                 as_attachment=True,
                 download_name=f"CSF_{rfc}.pdf"
             )
             
-        return jsonify({"message": "El SAT bloqueó la IP de la máscara. Reintenta."}), 404
-    except:
-        return jsonify({"message": "Error de máscara de red."}), 500
+        return jsonify({"message": "El SAT no respondió a la máscara. Reintenta."}), 404
+
+    except Exception as e:
+        # Esto nos dirá exactamente qué falló en los logs de Vercel
+        print(f"Error: {str(e)}")
+        return jsonify({"message": "Error de comunicación. Intenta de nuevo."}), 500
         
