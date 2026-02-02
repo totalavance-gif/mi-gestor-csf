@@ -4,7 +4,7 @@ import requests
 import io
 import urllib3
 
-# Desactivar advertencias de seguridad por usar la IP directa y verify=False
+# Desactiva alertas de seguridad por el uso de IP y verify=False
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 app = Flask(__name__)
@@ -23,17 +23,15 @@ def generar():
         if not rfc or not idcif:
             return jsonify({"message": "Faltan datos"}), 400
 
-        # Usamos la IP directa del SAT para evitar el NameResolutionError
-        # IP: 200.57.3.46 corresponde a sinat.sat.gob.mx
-        url = f"https://200.57.3.46/CifDirecto/Home/Index?rfc={rfc}&idCif={idcif}"
+        # CAMBIO CLAVE: Usamos http (sin S) e IP directa para saltar el error WRONG_VERSION_NUMBER
+        url = f"http://200.57.3.46/CifDirecto/Home/Index?rfc={rfc}&idCif={idcif}"
         
         headers = {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-            'Host': 'sinat.sat.gob.mx' # Forzamos el host en la cabecera
+            'Host': 'sinat.sat.gob.mx'
         }
         
-        # timeout=25 para dar tiempo al SAT de responder
-        # verify=False es obligatorio al usar la IP directa
+        # Realizamos la petición al servidor del SAT
         response = requests.get(url, headers=headers, timeout=25, verify=False)
 
         if response.status_code == 200 and b'%PDF' in response.content:
@@ -47,8 +45,6 @@ def generar():
         return jsonify({"message": "El SAT no generó el PDF. Verifica RFC e idCIF."}), 404
 
     except Exception as e:
-        return jsonify({"message": f"Error de conexión: {str(e)}"}), 500
-
-# Render no necesita app.run(), gunicorn se encarga
-
-          
+        # Enviamos el error limpio a la interfaz
+        return jsonify({"message": f"Error: {str(e)}"}), 500
+        
