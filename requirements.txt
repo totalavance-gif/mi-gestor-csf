@@ -4,3 +4,4 @@ requests
 urllib3
 gunicorn
 beautifulsoup4
+fpdf2
