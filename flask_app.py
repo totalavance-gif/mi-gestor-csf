@@ -2,6 +2,7 @@ from flask import Flask, request, send_file, jsonify, render_template
 from flask_cors import CORS
 import requests
 import io
+import random
 
 app = Flask(__name__)
 CORS(app)
@@ -16,23 +17,30 @@ def generar():
         rfc = request.form.get('rfc', '').upper().strip()
         idcif = request.form.get('idcif', '').strip()
         
-        # URL del recurso (mantenemos el CifDirecto pero con identidad técnica)
+        # URL de descarga directa
         url = f"https://sinat.sat.gob.mx/CifDirecto/Home/Index?rfc={rfc}&idCif={idcif}"
         
-        # --- BYPASS DE IDENTIDAD TÉCNICA (Basado en tu captura) ---
-        # Dejamos de fingir ser un navegador Chrome y fingimos ser el sistema
-        # de comunicación de la imagen: Apache-HttpClient/4.1.1 (java 1.5)
+        # --- ESTRATEGIA: TÚNEL DE RESIDENCIA ---
+        # Estos son "servidores puente" que tienen IPs no bloqueadas por el SAT.
+        # Intentaremos usar uno de estos para saltar desde Vercel.
+        puentes = [
+            "https://api.allorigins.win/raw?url=",
+            "https://thingproxy.freeboard.io/fetch/",
+            "https://corsproxy.io/?"
+        ]
+        
+        puente_elegido = random.choice(puentes)
+        target = f"{puente_elegido}{url}"
+
+        # Simulamos un usuario real de Telmex/Infinitum
         headers = {
-            'User-Agent': 'Apache-HttpClient/4.1.1 (java 1.5)',
-            'Accept-Encoding': 'gzip,deflate',
-            'Accept': 'application/pdf, text/xml, */*',
-            'Connection': 'Keep-Alive',
-            'Host': 'sinat.sat.gob.mx',
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/121.0.0.0',
+            'X-Forwarded-For': f"187.{random.randint(130,250)}.{random.randint(0,255)}.{random.randint(1,254)}",
             'Referer': 'https://www.sat.gob.mx/'
         }
 
-        # Petición al SAT usando la identidad técnica
-        response = requests.get(url, headers=headers, timeout=30, verify=False, stream=True)
+        # Petición a través del túnel
+        response = requests.get(target, headers=headers, timeout=25, verify=False)
 
         if response.status_code == 200 and b'%PDF' in response.content:
             return send_file(
@@ -42,9 +50,8 @@ def generar():
                 download_name=f"CSF_{rfc}.pdf"
             )
         
-        # Si el SAT responde pero pide el Token WRAP de tu imagen
-        return jsonify({"message": "El SAT exige autenticación SOAP/WRAP. Bypass denegado."}), 401
+        return jsonify({"message": "El muro del SAT es fuerte. Reintenta el salto."}), 403
 
     except Exception as e:
-        return jsonify({"message": "Falla en protocolo de identidad técnica."}), 500
+        return jsonify({"message": "Error de túnel residencial. Reintenta."}), 500
         
