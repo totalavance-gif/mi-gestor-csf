@@ -1,113 +1,89 @@
-import os
 from fpdf import FPDF
 import qrcode
-import io
-import hashlib
-import base64
-from datetime import datetime
+from io import BytesIO
 
 def generar_constancia_pdf(datos, rfc_usuario, idcif_usuario, url_sat):
-    base_dir = os.path.dirname(os.path.abspath(__file__))
-    image_path = os.path.join(base_dir, 'plantilla.png')
+    # 1. Configuración inicial del PDF
+    pdf = FPDF(orientation='P', unit='mm', format='A4')
+    pdf.add_page()
+    
+    # IMPORTANTE: Debes tener el archivo 'plantilla.jpg' en la misma carpeta
+    try:
+        pdf.image('plantilla.jpg', x=0, y=0, w=210, h=297)
+    except:
+        print("Error: No se encontró plantilla.jpg")
 
-    # --- Traducción de Fecha ---
-    meses = {
-        "January": "ENERO", "February": "FEBRERO", "March": "MARZO", 
-        "April": "ABRIL", "May": "MAYO", "June": "JUNIO", 
-        "July": "JULIO", "August": "AGOSTO", "September": "SEPTIEMBRE", 
-        "October": "OCTUBRE", "November": "NOVIEMBRE", "December": "DICIEMBRE"
-    }
-    fecha_dt = datetime.now()
-    mes_es = meses.get(fecha_dt.strftime('%B'), "FEBRERO")
-    fecha_espanol = f"{fecha_dt.strftime('%d')} DE {mes_es} DE {fecha_dt.year}"
+    # 2. Configuración de fuente (Helvetica es la más parecida a la del SAT)
+    pdf.set_font("Helvetica", "B", 10)
+    pdf.set_text_color(0, 0, 0)
 
-    # --- QR ---
+    # --- BLOQUE 1: IDENTIFICACIÓN (Coordenadas bajadas para centrar) ---
+    pdf.set_font("Helvetica", "", 8.5)
+    
+    # RFC
+    pdf.set_xy(82, 108.5) 
+    pdf.cell(0, 5, str(rfc_usuario).upper())
+    
+    # CURP
+    pdf.set_xy(82, 117.2)
+    pdf.cell(0, 5, str(datos.get('CURP', '')).upper())
+    
+    # Nombre Completo (Unificado)
+    nombre_completo = f"{datos.get('Nombre (s)', '')} {datos.get('Primer Apellido', '')} {datos.get('Segundo Apellido', '')}"
+    pdf.set_xy(82, 125.5)
+    pdf.cell(0, 5, nombre_completo.strip().upper())
+
+    # Fecha de Inicio de Operaciones
+    pdf.set_xy(82, 134.5)
+    pdf.cell(0, 5, str(datos.get('Fecha inicio de operaciones', '01 DE ENERO DE 2015')))
+
+    # Estatus
+    pdf.set_xy(82, 143)
+    pdf.cell(0, 5, str(datos.get('Estatus en el padrón', 'ACTIVO')))
+
+    # --- BLOQUE 2: DOMICILIO FISCAL (Ajuste de impacto para que no flote) ---
+    # Bajamos la coordenada Y para que el texto caiga DENTRO de los cuadros blancos
+    
+    pdf.set_xy(43, 191.5) # Código Postal
+    pdf.cell(40, 5, str(datos.get('Código Postal', '06300')))
+    
+    pdf.set_xy(135, 191.5) # Tipo de Vialidad
+    pdf.cell(0, 5, str(datos.get('Tipo de Vialidad', 'CALLE')))
+    
+    pdf.set_xy(43, 198.5) # Nombre de Vialidad (Calle)
+    pdf.cell(0, 5, str(datos.get('Nombre de Vialidad', 'AV. HIDALGO')))
+    
+    pdf.set_xy(135, 198.5) # Número Exterior
+    pdf.cell(0, 5, str(datos.get('Número Exterior', '77')))
+    
+    pdf.set_xy(43, 206.5) # Colonia
+    pdf.cell(0, 5, str(datos.get('Nombre de la Colonia', 'GUERRERO')))
+    
+    pdf.set_xy(135, 214) # Municipio / Alcaldía
+    pdf.cell(0, 5, str(datos.get('Nombre del Municipio o Demarcación Territorial', 'CUAUHTEMOC')))
+    
+    pdf.set_xy(43, 221.5) # Estado
+    pdf.cell(0, 5, str(datos.get('Nombre de la Entidad Federativa', 'CIUDAD DE MEXICO')))
+
+    # --- BLOQUE 3: GENERACIÓN DE QR OFICIAL ---
+    # Este es el QR que valida la constancia al escanearla
     qr = qrcode.QRCode(version=1, box_size=10, border=0)
     qr.add_data(url_sat)
     qr.make(fit=True)
     img_qr = qr.make_image(fill_color="black", back_color="white")
-    qr_io = io.BytesIO()
-    img_qr.save(qr_io, format='PNG')
-    qr_io.seek(0)
-
-    # Inicializar PDF
-    pdf = FPDF(orientation='P', unit='mm', format='A4')
-    pdf.add_page()
     
-    if os.path.exists(image_path):
-        pdf.image(image_path, x=0, y=0, w=210, h=297)
-
-    # --- 1. BLOQUE CÉDULA ---
-    pdf.image(qr_io, x=12, y=51, w=33)
+    # Guardar QR en memoria
+    qr_buffer = BytesIO()
+    img_qr.save(qr_buffer, format='PNG')
+    qr_buffer.seek(0)
     
-    pdf.set_font("Helvetica", "B", 10)
-    pdf.set_xy(58, 51.5)
-    pdf.cell(0, 5, str(rfc_usuario))
-    
-    # Nombre en Cédula (Usando "Nombre (s)" del JSON)
-    pdf.set_xy(58, 64)
-    nom = str(datos.get('Nombre (s)', '')).upper()
-    pa = str(datos.get('Primer Apellido', '')).upper()
-    sa = str(datos.get('Segundo Apellido', '')).upper()
-    nombre_completo = f"{nom} {pa} {sa}".strip()
-    
-    pdf.set_font("Helvetica", "B", 9)
-    pdf.multi_cell(100, 4, nombre_completo if nombre_completo else "CONTRIBUYENTE")
-    
-    # idCIF
-    pdf.set_xy(69, 80)
-    pdf.cell(0, 5, str(idcif_usuario))
+    # Insertar QR en la posición oficial (esquina inferior izquierda)
+    pdf.image(qr_buffer, x=15, y=245, w=35, h=35)
 
-    # Lugar y Fecha
-    pdf.set_font("Helvetica", "", 7)
-    pdf.set_xy(118, 70)
-    pdf.cell(80, 4, f"CUAUHTEMOC, CIUDAD DE MEXICO, A {fecha_espanol}", align='C')
-
-    # --- 2. TABLA DE IDENTIFICACIÓN ---
-    pdf.set_font("Helvetica", "", 8)
-    pdf.set_xy(82, 107) # RFC
-    pdf.cell(0, 5, str(rfc_usuario))
-    pdf.set_xy(82, 116) # CURP
-    pdf.cell(0, 5, str(datos.get('CURP', '')).upper())
-    pdf.set_xy(82, 122.5) # Nombre
-    pdf.cell(0, 5, nom)
-    pdf.set_xy(82, 131) # Apellido 1
-    pdf.cell(0, 5, pa)
-    pdf.set_xy(82, 138.5) # Apellido 2
-    pdf.cell(0, 5, sa)
-    pdf.set_xy(82, 145.5) # Inicio Op
-    pdf.cell(0, 5, str(datos.get('Fecha inicio de operaciones', '01 DE ENERO DE 2015')))
-    pdf.set_xy(82, 156) # Estatus
-    pdf.cell(0, 5, str(datos.get('Estatus en el padrón', 'ACTIVO')))
-
-    # --- 3. DOMICILIO (Datos del JSON) ---
-    pdf.set_xy(43, 185) # CP
-    pdf.cell(40, 5, str(datos.get('Código Postal', '06300')))
-    pdf.set_xy(135, 185) # Tipo Vialidad
-    pdf.cell(0, 5, str(datos.get('Tipo de Vialidad', 'CALLE')))
-    pdf.set_xy(43, 191) # Calle
-    pdf.cell(0, 5, str(datos.get('Nombre de Vialidad', 'AV. HIDALGO')))
-    pdf.set_xy(135, 191) # Num Ext
-    pdf.cell(0, 5, str(datos.get('Número Exterior', '77')))
-    pdf.set_xy(43, 202) # Colonia
-    pdf.cell(0, 5, str(datos.get('Nombre de la Colonia', 'GUERRERO')))
-    pdf.set_xy(135, 208) # Municipio
-    pdf.cell(0, 5, str(datos.get('Nombre del Municipio o Demarcación Territorial', 'CUAUHTEMOC')))
-    pdf.set_xy(43, 214) # Estado
-    pdf.cell(0, 5, str(datos.get('Nombre de la Entidad Federativa', 'CIUDAD DE MEXICO')))
-
-    # --- 4. SELLOS FINALES ---
-    pdf.set_font("Helvetica", "", 5)
-    cadena_original = f"||{fecha_dt.strftime('%Y/%m/%d')}|{rfc_usuario}|CONSTANCIA|{idcif_usuario}||"
-    sello_digital = base64.b64encode(hashlib.sha256(cadena_original.encode()).digest()).decode('utf-8')
-    pdf.set_xy(65, 258)
-    pdf.multi_cell(130, 2.5, cadena_original)
-    pdf.set_xy(65, 266)
-    pdf.multi_cell(130, 2, sello_digital)
-
-    # Retorno compatible con Vercel
-    pdf_output = io.BytesIO()
-    pdf_output.write(pdf.output())
+    # 4. Retornar el PDF como un stream de bytes para Flask
+    pdf_output = BytesIO()
+    pdf_output.write(pdf.output(dest='S').encode('latin-1'))
     pdf_output.seek(0)
+    
     return pdf_output
     
