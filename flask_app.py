@@ -5,64 +5,73 @@ import ssl
 import urllib3
 from reconstructor import generar_constancia_pdf
 
-# Eliminar ruidos de alertas
+# Desactiva alertas de seguridad innecesarias
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 app = Flask(__name__)
 
-# PARCHE DE SEGURIDAD PARA VERCEL (Permite conectar con el SAT)
+# --- PARCHE PARA EL ERROR SSL DEL SAT ---
 class SSLAdapter(requests.adapters.HTTPAdapter):
     def init_poolmanager(self, *args, **kwargs):
-        context = ssl.create_default_context()
-        context.set_ciphers('DEFAULT@SECLEVEL=1')
-        kwargs['ssl_context'] = context
+        ctx = ssl.create_default_context()
+        # Baja el nivel de seguridad solo para esta conexión para que el SAT la acepte
+        ctx.set_ciphers('DEFAULT@SECLEVEL=1')
+        kwargs['ssl_context'] = ctx
         return super(SSLAdapter, self).init_poolmanager(*args, **kwargs)
 
 @app.route('/')
 def index():
     return render_template('index.html')
 
-@app.route('/generar', methods=['POST'])
-def generar():
+@app.route('/extraer_sat', methods=['POST'])
+def extraer():
     try:
         rfc = request.form.get('rfc', '').upper().strip()
         idcif = request.form.get('idcif', '').strip()
-        
-        # Flujo original: Ir al SAT
-        validador_url = f"https://siat.sat.gob.mx/app/qr/faces/pages/mobile/validadorqr.jsf?D1=10&D2=1&D3={idcif}_{rfc}"
+        url = f"https://siat.sat.gob.mx/app/qr/faces/pages/mobile/validadorqr.jsf?D1=10&D2=1&D3={idcif}_{rfc}"
         
         session = requests.Session()
         session.mount('https://', SSLAdapter())
         
-        headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
-        response = session.get(validador_url, headers=headers, timeout=20, verify=False)
-
-        if response.status_code == 200:
-            soup = BeautifulSoup(response.text, 'html.parser')
-            datos_extraidos = {}
-            for row in soup.find_all('tr'):
-                cols = row.find_all('td')
-                if len(cols) >= 2:
-                    llave = cols[0].text.strip().replace(':', '')
-                    valor = cols[1].text.strip()
-                    datos_extraidos[llave] = valor
-
-            # Si el scraping fue exitoso, devolvemos los datos como antes
-            return jsonify({"status": "success", "data": datos_extraidos, "rfc": rfc, "idcif": idcif})
+        headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
+        r = session.get(url, headers=headers, timeout=15, verify=False)
         
-        return jsonify({"status": "error", "message": "El SAT no respondió"}), 503
-    except Exception as e:
-        return jsonify({"status": "error", "message": str(e)}), 500
+        soup = BeautifulSoup(r.text, 'html.parser')
+        datos = {}
+        for row in soup.find_all('tr'):
+            cols = row.find_all('td')
+            if len(cols) >= 2:
+                llave = cols[0].text.strip().replace(':', '')
+                datos[llave] = cols[1].text.strip()
 
-# Nueva ruta para el PDF (Usando los datos que ya extrajimos)
-@app.route('/descargar_pdf', methods=['POST'])
-def descargar_pdf():
-    # Recibe los datos del formulario final
-    datos = request.form.to_dict()
-    rfc = datos.get('rfc')
-    idcif = datos.get('idcif')
-    url_sat = f"https://siat.sat.gob.mx/app/qr/faces/pages/mobile/validadorqr.jsf?D1=10&D2=1&D3={idcif}_{rfc}"
-    
-    pdf_stream = generar_constancia_pdf(datos, rfc, idcif, url_sat)
-    return send_file(pdf_stream, mimetype='application/pdf', as_attachment=True, download_name=f"CSF_{rfc}.pdf")
-                        
+        if not datos:
+            return jsonify({"status": "error", "message": "No se encontraron datos. Verifica el ID CIF."})
+
+        return jsonify({
+            "status": "success",
+            "curp": datos.get('CURP', ''),
+            "nombre": datos.get('Nombre (s)', datos.get('Nombre', '')).upper(),
+            "rfc": rfc
+        })
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)})
+
+@app.route('/generar_pdf', methods=['POST'])
+def generar():
+    try:
+        datos_finales = {
+            "Nombre (s)": request.form.get('nombre', '').upper(),
+            "Primer Apellido": request.form.get('apellido_p', '').upper(),
+            "Segundo Apellido": request.form.get('apellido_m', '').upper(),
+            "CURP": request.form.get('curp', '').upper(),
+            "RFC": request.form.get('rfc', '').upper()
+        }
+        rfc = datos_finales["RFC"]
+        idcif = request.form.get('idcif')
+        url_sat = f"https://siat.sat.gob.mx/app/qr/faces/pages/mobile/validadorqr.jsf?D1=10&D2=1&D3={idcif}_{rfc}"
+        
+        pdf_stream = generar_constancia_pdf(datos_finales, rfc, idcif, url_sat)
+        return send_file(pdf_stream, mimetype='application/pdf', as_attachment=True, download_name=f'CSF_{rfc}.pdf')
+    except Exception as e:
+        return f"Error: {str(e)}", 500
+        
