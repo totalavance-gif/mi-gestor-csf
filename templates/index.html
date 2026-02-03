@@ -2,127 +2,78 @@
 <html lang="es">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Generador de Constancias v2.0</title>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600&display=swap" rel="stylesheet">
+    <title>Gestor de Constancias</title>
     <style>
-        :root { --primary: #0071bc; --accent: #28a745; --bg: #f4f7f6; }
-        body { font-family: 'Inter', sans-serif; background: var(--bg); display: flex; justify-content: center; padding: 20px; }
-        .card { background: white; padding: 30px; border-radius: 12px; box-shadow: 0 4px 20px rgba(0,0,0,0.1); width: 100%; max-width: 500px; }
-        h2 { color: #333; text-align: center; margin-bottom: 25px; }
-        .input-group { margin-bottom: 15px; }
-        label { display: block; margin-bottom: 5px; font-weight: 600; color: #555; font-size: 0.9em; }
-        input { width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 6px; box-sizing: border-box; font-size: 1em; }
-        input:focus { border-color: var(--primary); outline: none; }
-        .row { display: flex; gap: 10px; margin-bottom: 15px; }
-        button { width: 100%; padding: 12px; border: none; border-radius: 6px; cursor: pointer; font-weight: 600; transition: 0.3s; }
-        .btn-extract { background: var(--primary); color: white; margin-bottom: 10px; }
-        .btn-extract:hover { background: #005a96; }
-        .btn-generate { background: var(--accent); color: white; display: none; } /* Oculto hasta extraer */
-        .btn-generate:hover { background: #218838; }
-        .curp-display { background: #e9ecef; padding: 10px; border-radius: 6px; display: none; align-items: center; justify-content: space-between; margin-bottom: 20px; border: 1px dashed #6c757d; }
-        .curp-text { font-family: monospace; font-weight: bold; color: #d63384; }
-        .copy-badge { font-size: 0.7em; background: #6c757d; color: white; padding: 2px 6px; border-radius: 4px; cursor: pointer; }
+        body { font-family: sans-serif; padding: 20px; background: #f0f2f5; }
+        .card { background: white; padding: 20px; border-radius: 10px; max-width: 450px; margin: auto; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
+        input { width: 100%; padding: 10px; margin: 10px 0; border: 1px solid #ccc; border-radius: 5px; box-sizing: border-box; }
+        button { width: 100%; padding: 12px; border: none; border-radius: 5px; cursor: pointer; font-weight: bold; }
+        .btn-extract { background: #0071bc; color: white; }
+        .btn-pdf { background: #28a745; color: white; display: none; margin-top: 15px; }
+        .curp-box { background: #e9ecef; padding: 10px; margin: 15px 0; display: none; border-radius: 5px; text-align: center; }
+        #curp_val { font-weight: bold; color: #d63384; }
+        .copy-btn { font-size: 12px; background: #6c757d; color: white; padding: 3px 8px; border-radius: 4px; cursor: pointer; margin-left: 10px; }
     </style>
 </head>
 <body>
 
 <div class="card">
-    <h2>Constancia Fiscal Pro</h2>
+    <h3>Generador de Constancia</h3>
     
-    <form id="constanciaForm" action="/generar_pdf" method="POST">
-        <div class="row">
-            <div class="input-group" style="flex: 2;">
-                <label>RFC</label>
-                <input type="text" id="rfc" name="rfc" placeholder="ABCD123456XYZ" required maxlength="13">
-            </div>
-            <div class="input-group" style="flex: 1;">
-                <label>idCIF</label>
-                <input type="text" id="idcif" name="idcif" placeholder="123456" required maxlength="20">
-            </div>
-        </div>
+    <input type="text" id="rfc_in" placeholder="RFC">
+    <input type="text" id="idcif_in" placeholder="idCIF">
+    <button class="btn-extract" onclick="extraer()">1. EXTRAER DATOS DEL SAT</button>
 
-        <button type="button" class="btn-extract" onclick="extraerDatos()">1. Extraer Datos del SAT</button>
+    <div id="curp_box" class="curp-box">
+        CURP: <span id="curp_val"></span>
+        <span class="copy-btn" onclick="copiar()">COPIAR</span>
+    </div>
 
-        <div id="curpContainer" class="curp-display">
-            <span>CURP: <span id="curpVal" class="curp-text"></span></span>
-            <span class="copy-badge" onclick="copyCurp()">COPIAR</span>
-        </div>
-
-        <div id="seccionEdicion">
-            <div class="input-group">
-                <label>Nombre(s)</label>
-                <input type="text" id="nombre" name="nombre" required>
-            </div>
-            <div class="row">
-                <div class="input-group">
-                    <label>Primer Apellido</label>
-                    <input type="text" id="apellido_p" name="apellido_p" required>
-                </div>
-                <div class="input-group">
-                    <label>Segundo Apellido</label>
-                    <input type="text" id="apellido_m" name="apellido_m">
-                </div>
-            </div>
-            <div class="input-group">
-                <label>CURP (Confirmar)</label>
-                <input type="text" id="curp_final" name="curp" required>
-            </div>
-            <input type="hidden" id="cp" name="cp" value="06300">
-
-            <button type="submit" class="btn-generate" id="btnGenerate">2. Generar Constancia PDF</button>
-        </div>
+    <form action="/generar_pdf" method="POST" id="form_final">
+        <input type="hidden" name="rfc" id="f_rfc">
+        <input type="hidden" name="idcif" id="f_idcif">
+        <input type="hidden" name="curp" id="f_curp">
+        
+        <label>Verifica y completa:</label>
+        <input type="text" name="nombre" id="f_nombre" placeholder="Nombre(s)" required>
+        <input type="text" name="apellido_p" placeholder="Primer Apellido" required>
+        <input type="text" name="apellido_m" placeholder="Segundo Apellido">
+        
+        <button type="submit" class="btn-pdf" id="btn_pdf">2. GENERAR PDF FINAL</button>
     </form>
 </div>
 
 <script>
-    async function extraerDatos() {
-        const rfc = document.getElementById('rfc').value;
-        const idcif = document.getElementById('idcif').value;
-
-        if(!rfc || !idcif) return alert("Escribe RFC e idCIF");
-
-        const btn = document.querySelector('.btn-extract');
-        btn.innerText = "Buscando...";
-        btn.disabled = true;
-
-        try {
-            const formData = new FormData();
-            formData.append('rfc', rfc);
-            formData.append('idcif', idcif);
-
-            const response = await fetch('/extraer_sat', { method: 'POST', body: formData });
-            const result = await response.json();
-
-            if(result.status === "success") {
-                // Llenar campos
-                document.getElementById('curpVal').innerText = result.curp_encontrada;
-                document.getElementById('curp_final').value = result.curp_encontrada;
-                document.getElementById('nombre').value = result.nombre_sat;
-                document.getElementById('cp').value = result.cp || "06300";
-                
-                // Mostrar elementos
-                document.getElementById('curpContainer').style.display = 'flex';
-                document.getElementById('btnGenerate').style.display = 'block';
-                alert("CURP encontrada. Si el nombre está incompleto, usa la CURP para buscar los apellidos.");
-            } else {
-                alert("Error: " + result.message);
-            }
-        } catch (e) {
-            alert("Error de conexión");
-        } finally {
-            btn.innerText = "1. Extraer Datos del SAT";
-            btn.disabled = false;
-        }
-    }
-
-    function copyCurp() {
-        const text = document.getElementById('curpVal').innerText;
-        navigator.clipboard.writeText(text);
-        alert("CURP copiada al portapapeles");
-    }
-</script>
-
-</body>
-    </html>
+async function extraer() {
+    const rfc = document.getElementById('rfc_in').value;
+    const idcif = document.getElementById('idcif_in').value;
     
+    const fd = new FormData();
+    fd.append('rfc', rfc);
+    fd.append('idcif', idcif);
+
+    const res = await fetch('/extraer_sat', { method: 'POST', body: fd });
+    const data = await res.json();
+
+    if(data.status === 'success') {
+        document.getElementById('curp_val').innerText = data.curp;
+        document.getElementById('f_curp').value = data.curp;
+        document.getElementById('f_rfc').value = data.rfc;
+        document.getElementById('f_idcif').value = idcif;
+        document.getElementById('f_nombre').value = data.nombre;
+
+        document.getElementById('curp_box').style.display = 'block';
+        document.getElementById('btn_pdf').style.display = 'block';
+    } else {
+        alert("Error: " + data.message);
+    }
+}
+
+function copiar() {
+    const val = document.getElementById('curp_val').innerText;
+    navigator.clipboard.writeText(val);
+    alert("CURP Copiada al portapapeles");
+}
+</script>
+</body>
+</html>
