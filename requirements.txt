@@ -1,8 +1,5 @@
 flask
-flask-cors
 requests
-urllib3
-gunicorn
 beautifulsoup4
 fpdf
 qrcode
