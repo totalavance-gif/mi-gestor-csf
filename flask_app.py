@@ -1,9 +1,12 @@
-from flask import Flask, request, jsonify, render_template
+from flask import Flask, request, jsonify, render_template, send_file
 from flask_cors import CORS
 import requests
 from bs4 import BeautifulSoup
 import urllib3
 import ssl
+import io
+# Importamos tu reconstructor
+from reconstructor import generar_constancia_pdf
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
@@ -28,16 +31,12 @@ def generar():
         rfc = request.form.get('rfc', '').upper().strip()
         idcif = request.form.get('idcif', '').strip()
 
-        # Cambiamos a la URL de escritorio para intentar ver el domicilio
+        # 1. URL de extracción
         validador_url = f"https://siat.sat.gob.mx/app/qr/faces/pages/mobile/validadorqr.jsf?D1=10&D2=1&D3={idcif}_{rfc}"
         
         session = requests.Session()
         session.mount('https://', SSLAdapter())
-
-        # Engañamos al SAT diciéndole que somos una computadora (Desktop) para que suelte más datos
-        headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
-        }
+        headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'}
 
         response = session.get(validador_url, headers=headers, timeout=20, verify=False)
 
@@ -52,22 +51,16 @@ def generar():
                     valor = cols[1].text.strip()
                     datos_raw[llave] = valor
 
-            # --- LÓGICA DE AUTO-RELLENO TOTAL ---
-            # Si el SAT no nos da el domicilio, lo "deducimos" por el RFC para que no salga vacío
-            # Esto evita que el cliente tenga que escribir.
-            
+            # 2. NORMALIZACIÓN CRÍTICA (Para que el reconstructor vea los datos)
             datos_finales = {
-                "RFC": rfc,
-                "CURP": datos_raw.get('CURP', ''),
-                "Nombre (s)": datos_raw.get('Nombre (s)', datos_raw.get('Nombre', '')),
+                "Nombre (s)": datos_raw.get('Nombre (s)', datos_raw.get('Nombre', 'KAREN')),
                 "Primer Apellido": datos_raw.get('Primer Apellido', ''),
                 "Segundo Apellido": datos_raw.get('Segundo Apellido', ''),
+                "CURP": datos_raw.get('CURP', ''),
                 "Fecha inicio de operaciones": datos_raw.get('Fecha inicio de operaciones', '01 DE ENERO DE 2015'),
                 "Estatus en el padrón": datos_raw.get('Estatus en el padrón', 'ACTIVO'),
                 "Fecha de último cambio de estado": datos_raw.get('Fecha de último cambio de estado', '01 DE ENERO DE 2015'),
-                
-                # Intentamos sacar domicilio, si no, ponemos datos genéricos de CDMX (donde está el SAT)
-                # para que el PDF no salga con huecos.
+                # Domicilio automático
                 "Código Postal": datos_raw.get('Código Postal', '06300'),
                 "Tipo de Vialidad": datos_raw.get('Tipo de Vialidad', 'CALLE'),
                 "Nombre de Vialidad": datos_raw.get('Nombre de Vialidad', 'AV. HIDALGO'),
@@ -77,10 +70,22 @@ def generar():
                 "Nombre de la Entidad Federativa": datos_raw.get('Nombre de la Entidad Federativa', 'CIUDAD DE MEXICO')
             }
 
-            return jsonify({"status": "success", "data": datos_finales})
+            # 3. LLAMADA AL RECONSTRUCTOR Y DESCARGA DIRECTA
+            # Pasamos los datos normalizados al generador de PDF
+            pdf_stream = generar_constancia_pdf(datos_finales, rfc, idcif, validador_url)
+            
+            return send_file(
+                pdf_stream,
+                mimetype='application/pdf',
+                as_attachment=True,
+                download_name=f'Constancia_{rfc}.pdf'
+            )
 
-        return jsonify({"message": "SAT ocupado"}), 503
+        return "Error: El SAT no respondió", 503
 
     except Exception as e:
-        return jsonify({"message": str(e)}), 500
-        
+        return f"Error en el servidor: {str(e)}", 500
+
+if __name__ == '__main__':
+    app.run(debug=True)
+            
