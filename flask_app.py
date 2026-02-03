@@ -1,23 +1,21 @@
-from flask import Flask, request, jsonify, render_template, send_file
+From flask import Flask, request, jsonify, render_template
 from flask_cors import CORS
 import requests
 from bs4 import BeautifulSoup
 import urllib3
 import ssl
-from reconstructor import generar_constancia_pdf
 
-# Desactivar advertencias de SSL
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 app = Flask(__name__)
 CORS(app)
 
-# --- PARCHE PARA EL ERROR SSL 'DH_KEY_TOO_SMALL' ---
+# Bypass de Seguridad SSL para el SAT
 class SSLAdapter(requests.adapters.HTTPAdapter):
     def init_poolmanager(self, *args, **kwargs):
         ctx = ssl.create_default_context()
-        # Bajamos el nivel de seguridad solo para esta sesión para aceptar al SAT
         ctx.set_ciphers('DEFAULT@SECLEVEL=1')
+        ctx.check_hostname = False
         kwargs['ssl_context'] = ctx
         return super(SSLAdapter, self).init_poolmanager(*args, **kwargs)
 
@@ -25,57 +23,49 @@ class SSLAdapter(requests.adapters.HTTPAdapter):
 def home():
     return render_template('index.html')
 
-# Ruta para extraer los datos (CURP y Nombre)
-@app.route('/extraer_sat', methods=['POST'])
-def extraer_sat():
+@app.route('/generar', methods=['POST'])
+def generar():
     try:
         rfc = request.form.get('rfc', '').upper().strip()
         idcif = request.form.get('idcif', '').strip()
-        url = f"https://siat.sat.gob.mx/app/qr/faces/pages/mobile/validadorqr.jsf?D1=10&D2=1&D3={idcif}_{rfc}"
+
+        # URL del validador móvil (la más estable que encontramos)
+        validador_url = f"https://siat.sat.gob.mx/app/qr/faces/pages/mobile/validadorqr.jsf?D1=10&D2=1&D3={idcif}_{rfc}"
         
         session = requests.Session()
         session.mount('https://', SSLAdapter())
-        r = session.get(url, timeout=20, verify=False)
-        
-        if r.status_code == 200:
-            soup = BeautifulSoup(r.text, 'html.parser')
-            datos = {}
+
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Linux; Android 10) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Mobile Safari/537.36'
+        }
+
+        # Realizamos el scraping de datos
+        response = session.get(validador_url, headers=headers, timeout=20, verify=False)
+
+        if response.status_code == 200:
+            soup = BeautifulSoup(response.text, 'html.parser')
+            datos_extraidos = {}
+            
+            # Buscamos todas las tablas de datos fiscales en el HTML
             for row in soup.find_all('tr'):
                 cols = row.find_all('td')
                 if len(cols) >= 2:
                     llave = cols[0].text.strip().replace(':', '')
-                    datos[llave] = cols[1].text.strip()
+                    valor = cols[1].text.strip()
+                    if llave and valor:
+                        datos_extraidos[llave] = valor
+
+            if not datos_extraidos:
+                return jsonify({"message": "Se entró al SAT pero la tabla está vacía. Verifica ID CIF."}), 404
 
             return jsonify({
                 "status": "success",
-                "curp": datos.get('CURP', ''),
-                "nombre": datos.get('Nombre (s)', datos.get('Nombre', '')).upper(),
-                "rfc": rfc
+                "data": datos_extraidos
             })
-        return jsonify({"status": "error", "message": "SAT no disponible"}), 503
-    except Exception as e:
-        return jsonify({"status": "error", "message": str(e)}), 500
 
-# Ruta para generar el PDF con los datos manuales del HTML
-@app.route('/generar_pdf', methods=['POST'])
-def generar_pdf():
-    try:
-        datos_finales = {
-            "Nombre (s)": request.form.get('nombre', '').upper(),
-            "Primer Apellido": request.form.get('apellido_p', '').upper(),
-            "Segundo Apellido": request.form.get('apellido_m', '').upper(),
-            "CURP": request.form.get('curp', '').upper(),
-            "RFC": request.form.get('rfc', '').upper(),
-            "Código Postal": "06300",
-            "Nombre de Vialidad": "AV. HIDALGO",
-            "Número Exterior": "77"
-        }
-        rfc = datos_finales["RFC"]
-        idcif = request.form.get('idcif', '')
-        url_sat = f"https://siat.sat.gob.mx/app/qr/faces/pages/mobile/validadorqr.jsf?D1=10&D2=1&D3={idcif}_{rfc}"
-        
-        pdf_stream = generar_constancia_pdf(datos_finales, rfc, idcif, url_sat)
-        return send_file(pdf_stream, mimetype='application/pdf', as_attachment=True, download_name=f'CSF_{rfc}.pdf')
+        return jsonify({"message": "El SAT no respondió a la consulta de datos."}), 503
+
     except Exception as e:
-        return f"Error: {str(e)}", 500
-        
+        return jsonify({"message": f"Falla en extracción: {str(e)}"}), 500
+
+Este fue el funcionó a este agrega lo de la reconstrucción del PDF para que visualmente se parezca a una constancia de situación fiscal incluye lo del codigo qr
