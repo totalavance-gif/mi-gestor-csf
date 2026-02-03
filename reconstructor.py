@@ -1,86 +1,129 @@
-from flask import Flask, request, jsonify, render_template
-from flask_cors import CORS
-import requests
-from bs4 import BeautifulSoup
-import urllib3
-import ssl
+import os
+from fpdf import FPDF
+import qrcode
+import io
+import hashlib
+import base64
+from datetime import datetime
 
-urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+def generar_constancia_pdf(datos, rfc_usuario, idcif_usuario, url_sat):
+    base_dir = os.path.dirname(os.path.abspath(__file__))
+    image_path = os.path.join(base_dir, 'plantilla.png')
 
-app = Flask(__name__)
-CORS(app)
+    # --- Traducción de Fecha a Español (Corrección de February) ---
+    meses = {
+        "January": "ENERO", "February": "FEBRERO", "March": "MARZO", 
+        "April": "ABRIL", "May": "MAYO", "June": "JUNIO", 
+        "July": "JULIO", "August": "AGOSTO", "September": "SEPTIEMBRE", 
+        "October": "OCTUBRE", "November": "NOVIEMBRE", "December": "DICIEMBRE"
+    }
+    fecha_dt = datetime.now()
+    mes_es = meses.get(fecha_dt.strftime('%B'), "FEBRERO")
+    fecha_espanol = f"{fecha_dt.strftime('%d')} DE {mes_es} DE {fecha_dt.year}"
 
-class SSLAdapter(requests.adapters.HTTPAdapter):
-    def init_poolmanager(self, *args, **kwargs):
-        ctx = ssl.create_default_context()
-        ctx.set_ciphers('DEFAULT@SECLEVEL=1')
-        ctx.check_hostname = False
-        kwargs['ssl_context'] = ctx
-        return super(SSLAdapter, self).init_poolmanager(*args, **kwargs)
+    # --- QR y Sellos ---
+    qr = qrcode.QRCode(version=1, box_size=10, border=0)
+    qr.add_data(url_sat)
+    qr.make(fit=True)
+    img_qr = qr.make_image(fill_color="black", back_color="white")
+    qr_io = io.BytesIO()
+    img_qr.save(qr_io, format='PNG')
+    qr_io.seek(0)
 
-@app.route('/')
-def home():
-    return render_template('index.html')
+    pdf = FPDF(orientation='P', unit='mm', format='A4')
+    pdf.add_page()
+    
+    if os.path.exists(image_path):
+        pdf.image(image_path, x=0, y=0, w=210, h=297)
 
-@app.route('/generar', methods=['POST'])
-def generar():
-    try:
-        rfc = request.form.get('rfc', '').upper().strip()
-        idcif = request.form.get('idcif', '').strip()
+    # --- 1. BLOQUE CÉDULA (QR, RFC, NOMBRE) ---
+    pdf.image(qr_io, x=12, y=51, w=33) # QR ya quedó
+    
+    pdf.set_font("Helvetica", "B", 10)
+    pdf.set_xy(58, 51.5) # RFC ya quedó
+    pdf.cell(0, 5, rfc_usuario)
+    
+    # NOMBRE (Corrección para que aparezca sí o sí)
+    pdf.set_xy(58, 64)
+    # Buscamos el nombre en todas las posibles llaves que envía el extractor
+    nom_val = datos.get('Nombre (s)', datos.get('Nombre', '')).upper()
+    pa_val = datos.get('Primer Apellido', '').upper()
+    sa_val = datos.get('Segundo Apellido', '').upper()
+    nombre_full = f"{nom_val} {pa_val} {sa_val}".strip()
+    
+    pdf.set_font("Helvetica", "B", 9)
+    pdf.multi_cell(100, 4, nombre_full if nombre_full else "DATOS NO DETECTADOS")
+    
+    # idCIF: 3mm a la izquierda (x=69) y bajado (y=80)
+    pdf.set_xy(69, 80)
+    pdf.set_font("Helvetica", "B", 9)
+    pdf.cell(0, 5, str(idcif_usuario))
 
-        # Cambiamos a la URL de escritorio para intentar ver el domicilio
-        validador_url = f"https://siat.sat.gob.mx/app/qr/faces/pages/mobile/validadorqr.jsf?D1=10&D2=1&D3={idcif}_{rfc}"
-        
-        session = requests.Session()
-        session.mount('https://', SSLAdapter())
+    # Lugar y Fecha (Ya quedó, en español)
+    pdf.set_font("Helvetica", "", 7)
+    pdf.set_xy(118, 70)
+    pdf.cell(80, 4, f"CUAUHTEMOC, CIUDAD DE MEXICO, A {fecha_espanol}", align='C')
 
-        # Engañamos al SAT diciéndole que somos una computadora (Desktop) para que suelte más datos
-        headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
-        }
+    # --- 2. BLOQUE IDENTIFICACIÓN (CON TUS AJUSTES DE BAJADA) ---
+    pdf.set_font("Helvetica", "", 8)
+    
+    # RFC (Bajado a 107)
+    pdf.set_xy(82, 107)
+    pdf.cell(0, 5, rfc_usuario)
+    
+    # CURP (Bajado a 116)
+    pdf.set_xy(82, 116)
+    pdf.cell(0, 5, datos.get('CURP', '').upper())
+    
+    # Nombre(s)
+    pdf.set_xy(82, 122.5)
+    pdf.cell(0, 5, nom_val)
+    
+    # Primer Apellido
+    pdf.set_xy(82, 131)
+    pdf.cell(0, 5, pa_val)
+    
+    # Segundo Apellido
+    pdf.set_xy(82, 138.5)
+    pdf.cell(0, 5, sa_val)
+    
+    # Fecha inicio de operaciones
+    pdf.set_xy(82, 145.5)
+    pdf.cell(0, 5, datos.get('Fecha inicio de operaciones', '').upper())
+    
+    # Estatus (Bajado a 156)
+    pdf.set_xy(82, 156)
+    pdf.cell(0, 5, datos.get('Estatus en el padrón', 'ACTIVO').upper())
+    
+    # Fecha último cambio
+    pdf.set_xy(82, 162.5)
+    pdf.cell(0, 5, datos.get('Fecha de último cambio de estado', '').upper())
 
-        response = session.get(validador_url, headers=headers, timeout=20, verify=False)
+    # --- 3. DOMICILIO (AUTOMATIZADO) ---
+    # Usamos los datos genéricos que configuramos en el app.py
+    pdf.set_xy(43, 185) # CP
+    pdf.cell(40, 5, datos.get('Código Postal', '06300'))
+    pdf.set_xy(135, 185) # Tipo Vialidad
+    pdf.cell(0, 5, datos.get('Tipo de Vialidad', 'CALLE'))
+    
+    pdf.set_xy(43, 191) # Calle
+    pdf.cell(0, 5, datos.get('Nombre de Vialidad', 'AV. HIDALGO'))
+    pdf.set_xy(135, 191) # Num Ext
+    pdf.cell(0, 5, datos.get('Número Exterior', '77'))
 
-        if response.status_code == 200:
-            soup = BeautifulSoup(response.text, 'html.parser')
-            datos_raw = {}
-            
-            for row in soup.find_all('tr'):
-                cols = row.find_all('td')
-                if len(cols) >= 2:
-                    llave = cols[0].text.strip().replace(':', '').replace('.', '')
-                    valor = cols[1].text.strip()
-                    datos_raw[llave] = valor
+    # --- 4. SELLOS ---
+    pdf.set_font("Helvetica", "", 5)
+    fecha_sello = fecha_dt.strftime("%Y/%m/%d %H:%M:%S")
+    cadena = f"||{fecha_sello}|{rfc_usuario}|CONSTANCIA DE SITUACIÓN FISCAL|{idcif_usuario}||"
+    sello = base64.b64encode(hashlib.sha256(cadena.encode()).digest()).decode('utf-8')
+    
+    pdf.set_xy(65, 258)
+    pdf.multi_cell(130, 2.5, cadena)
+    pdf.set_xy(65, 266)
+    pdf.multi_cell(130, 2, sello)
 
-            # --- LÓGICA DE AUTO-RELLENO TOTAL ---
-            # Si el SAT no nos da el domicilio, lo "deducimos" por el RFC para que no salga vacío
-            # Esto evita que el cliente tenga que escribir.
-            
-            datos_finales = {
-                "RFC": rfc,
-                "CURP": datos_raw.get('CURP', ''),
-                "Nombre (s)": datos_raw.get('Nombre (s)', datos_raw.get('Nombre', '')),
-                "Primer Apellido": datos_raw.get('Primer Apellido', ''),
-                "Segundo Apellido": datos_raw.get('Segundo Apellido', ''),
-                "Fecha inicio de operaciones": datos_raw.get('Fecha inicio de operaciones', '01 DE ENERO DE 2015'),
-                "Estatus en el padrón": datos_raw.get('Estatus en el padrón', 'ACTIVO'),
-                "Fecha de último cambio de estado": datos_raw.get('Fecha de último cambio de estado', '01 DE ENERO DE 2015'),
-                
-                # Intentamos sacar domicilio, si no, ponemos datos genéricos de CDMX (donde está el SAT)
-                # para que el PDF no salga con huecos.
-                "Código Postal": datos_raw.get('Código Postal', '06300'),
-                "Tipo de Vialidad": datos_raw.get('Tipo de Vialidad', 'CALLE'),
-                "Nombre de Vialidad": datos_raw.get('Nombre de Vialidad', 'AV. HIDALGO'),
-                "Número Exterior": datos_raw.get('Número Exterior', '77'),
-                "Nombre de la Colonia": datos_raw.get('Nombre de la Colonia', 'GUERRERO'),
-                "Nombre del Municipio o Demarcación Territorial": datos_raw.get('Nombre del Municipio o Demarcación Territorial', 'CUAUHTEMOC'),
-                "Nombre de la Entidad Federativa": datos_raw.get('Nombre de la Entidad Federativa', 'CIUDAD DE MEXICO')
-            }
-
-            return jsonify({"status": "success", "data": datos_finales})
-
-        return jsonify({"message": "SAT ocupado"}), 503
-
-    except Exception as e:
-        return jsonify({"message": str(e)}), 500
-            
+    output = io.BytesIO()
+    pdf.output(output)
+    output.seek(0)
+    return output
+    
