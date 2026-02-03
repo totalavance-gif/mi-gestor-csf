@@ -2,67 +2,87 @@
 <html lang="es">
 <head>
     <meta charset="UTF-8">
-    <title>Generador CSF Oficial</title>
+    <title>Extractor SAT Oficial</title>
     <style>
         body { font-family: sans-serif; background: #f0f2f5; padding: 20px; }
-        .card { background: white; padding: 25px; border-radius: 10px; max-width: 450px; margin: auto; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
-        input { width: 100%; padding: 12px; margin: 10px 0; border: 1px solid #ddd; border-radius: 5px; box-sizing: border-box; }
-        button { width: 100%; padding: 12px; border: none; border-radius: 5px; cursor: pointer; font-weight: bold; }
+        .card { background: white; padding: 20px; border-radius: 8px; max-width: 500px; margin: auto; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+        input { width: 100%; padding: 10px; margin: 10px 0; border: 1px solid #ccc; border-radius: 4px; box-sizing: border-box; }
+        button { width: 100%; padding: 10px; border: none; border-radius: 4px; cursor: pointer; font-weight: bold; }
         .btn-blue { background: #007bff; color: white; }
-        .btn-green { background: #28a745; color: white; margin-top: 15px; display: none; }
-        #curp-info { display: none; background: #fff3cd; padding: 15px; border-radius: 5px; margin-top: 15px; text-align: center; }
-        #manual-fields { display: none; }
+        .btn-green { background: #28a745; color: white; display: none; margin-top: 15px; }
+        #result { margin-top: 20px; background: #e9ecef; padding: 10px; border-radius: 5px; display: none; font-size: 0.9em; }
+        .curp-copy { background: #fff3cd; padding: 10px; margin-top: 10px; border: 1px dashed #856404; text-align: center; display: none; }
     </style>
 </head>
 <body>
-    <div class="card">
-        <h2>Extractor SAT</h2>
-        <input type="text" id="rfc" placeholder="RFC">
-        <input type="text" id="idcif" placeholder="ID CIF">
-        <button class="btn-blue" onclick="extraer()">1. EXTRAER DATOS</button>
 
-        <div id="curp-info">
-            <small>CURP Extraída:</small><br>
-            <strong id="curp-text"></strong>
-        </div>
+<div class="card">
+    <h3>Consulta de Datos Fiscales</h3>
+    <form id="extractForm">
+        <input type="text" id="rfc" name="rfc" placeholder="RFC" required>
+        <input type="text" id="idcif" name="idcif" placeholder="ID CIF" required>
+        <button type="submit" class="btn-blue" id="btn-ext">1. CONSULTAR DATOS (SAT)</button>
+    </form>
 
-        <form id="manual-fields" action="/generar_pdf" method="POST">
-            <input type="hidden" name="rfc" id="f_rfc">
-            <input type="hidden" name="idcif" id="f_idcif">
-            <input type="hidden" name="curp" id="f_curp">
-            
-            <label>Confirmar Nombre(s):</label>
-            <input type="text" name="nombre" id="f_nombre" required>
-            <input type="text" name="apellido_p" placeholder="Apellido Paterno" required>
-            <input type="text" name="apellido_m" placeholder="Apellido Materno">
-            
-            <button type="submit" class="btn-green" id="btn-gen">2. GENERAR PDF FINAL</button>
-        </form>
+    <div id="result"></div>
+
+    <div id="curp-area" class="curp-copy">
+        <strong>CURP:</strong> <span id="val-curp"></span>
+        <button onclick="copiar()" style="padding: 2px 5px; font-size: 10px; margin-left: 10px;">COPIAR</button>
     </div>
 
-    <script>
-        async function extraer() {
-            const rfc = document.getElementById('rfc').value;
-            const idcif = document.getElementById('idcif').value;
-            const fd = new FormData();
-            fd.append('rfc', rfc);
-            fd.append('idcif', idcif);
+    <form id="pdfForm" action="/descargar_pdf" method="POST" style="display:none; margin-top:20px;">
+        <input type="hidden" name="rfc" id="f_rfc">
+        <input type="hidden" name="idcif" id="f_idcif">
+        <input type="hidden" name="CURP" id="f_curp">
+        
+        <label>Nombre(s):</label>
+        <input type="text" name="Nombre (s)" id="f_nombre" required>
+        <input type="text" name="Primer Apellido" placeholder="Apellido Paterno" required>
+        <input type="text" name="Segundo Apellido" placeholder="Apellido Materno">
+        
+        <button type="submit" class="btn-green" id="btn-pdf">2. GENERAR PDF FINAL</button>
+    </form>
+</div>
 
-            const res = await fetch('/extraer_sat', { method: 'POST', body: fd });
-            const data = await res.json();
+<script>
+    document.getElementById('extractForm').onsubmit = async (e) => {
+        e.preventDefault();
+        const btn = document.getElementById('btn-ext');
+        btn.disabled = true; btn.innerText = "Buscando en SAT...";
 
-            if(data.status === 'success') {
-                document.getElementById('curp-text').innerText = data.curp;
-                document.getElementById('f_curp').value = data.curp;
-                document.getElementById('f_rfc').value = data.rfc;
-                document.getElementById('f_idcif').value = idcif;
-                document.getElementById('f_nombre').value = data.nombre;
+        const fd = new FormData(e.target);
+        const res = await fetch('/generar', { method: 'POST', body: fd });
+        const data = await res.json();
 
-                document.getElementById('curp-info').style.display = 'block';
-                document.getElementById('manual-fields').style.display = 'block';
-                document.getElementById('btn-gen').style.display = 'block';
-            } else { alert("Error: " + data.message); }
+        if(data.status === 'success') {
+            // Mostrar JSON como antes
+            document.getElementById('result').style.display = 'block';
+            document.getElementById('result').innerText = JSON.stringify(data.data, null, 2);
+
+            // Preparar CURP y Formulario
+            const curp = data.data["CURP"] || "";
+            document.getElementById('val-curp').innerText = curp;
+            document.getElementById('curp-area').style.display = 'block';
+
+            document.getElementById('f_curp').value = curp;
+            document.getElementById('f_rfc').value = data.rfc;
+            document.getElementById('f_idcif').value = data.idcif;
+            document.getElementById('f_nombre').value = data.data["Nombre (s)"] || "";
+
+            document.getElementById('pdfForm').style.display = 'block';
+            document.getElementById('btn-pdf').style.display = 'block';
+        } else {
+            alert("Error: " + data.message);
         }
-    </script>
+        btn.disabled = false; btn.innerText = "1. CONSULTAR DATOS (SAT)";
+    };
+
+    function copiar() {
+        const c = document.getElementById('val-curp').innerText;
+        navigator.clipboard.writeText(c);
+        alert("CURP Copiada");
+    }
+</script>
 </body>
 </html>
