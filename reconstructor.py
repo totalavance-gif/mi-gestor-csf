@@ -10,9 +10,20 @@ def generar_constancia_pdf(datos, rfc_usuario, idcif_usuario, url_sat):
     base_dir = os.path.dirname(os.path.abspath(__file__))
     image_path = os.path.join(base_dir, 'plantilla.png')
 
+    # --- Traducción de Fecha a Español ---
+    meses = {
+        "January": "ENERO", "February": "FEBRERO", "March": "MARZO", 
+        "April": "ABRIL", "May": "MAYO", "June": "JUNIO", 
+        "July": "JULIO", "August": "AGOSTO", "September": "SEPTIEMBRE", 
+        "October": "OCTUBRE", "November": "NOVIEMBRE", "December": "DICIEMBRE"
+    }
+    fecha_dt = datetime.now()
+    mes_es = meses.get(fecha_dt.strftime('%B'), fecha_dt.strftime('%B').upper())
+    fecha_espanol = f"{fecha_dt.strftime('%d')} DE {mes_es} DE {fecha_dt.year}"
+
     # --- Validación y Sellos ---
-    fecha_emision = datetime.now().strftime("%Y/%m/%d %H:%M:%S")
-    cadena = f"||{fecha_emision}|{rfc_usuario}|CONSTANCIA DE SITUACIÓN FISCAL|{idcif_usuario}||"
+    fecha_emision_sello = fecha_dt.strftime("%Y/%m/%d %H:%M:%S")
+    cadena = f"||{fecha_emision_sello}|{rfc_usuario}|CONSTANCIA DE SITUACIÓN FISCAL|{idcif_usuario}||"
     sello = base64.b64encode(hashlib.sha256(cadena.encode()).digest()).decode('utf-8')
 
     # --- Generar QR ---
@@ -27,41 +38,37 @@ def generar_constancia_pdf(datos, rfc_usuario, idcif_usuario, url_sat):
     pdf = FPDF(orientation='P', unit='mm', format='A4')
     pdf.add_page()
     
-    # 1. Primero colocamos la plantilla de fondo
     if os.path.exists(image_path):
         pdf.image(image_path, x=0, y=0, w=210, h=297)
 
-    # --- AJUSTES FINALES ---
+    # --- AJUSTES SOLICITADOS ---
 
-    # QR: Se queda en la posición que ya te gustó
+    # 1. QR y RFC (Se quedan como estaban, ya confirmaste que están bien)
     pdf.image(qr_io, x=12, y=51, w=33)
-    
-    # RFC: Se queda en la posición que ya te gustó
     pdf.set_font("Helvetica", "B", 10)
     pdf.set_xy(58, 51.5)
     pdf.cell(0, 5, rfc_usuario)
     
-    # NOMBRE: Ajuste de posición y visibilidad
-    # Lo moví ligeramente para asegurar que no choque con etiquetas de la plantilla
-    pdf.set_xy(58, 65) 
+    # 2. NOMBRE: Ajuste de área para asegurar que aparezca
+    # Lo bajamos a y=64 y damos más ancho (100mm)
+    pdf.set_xy(58, 64) 
     nombre_completo = f"{datos.get('Nombre (s)', '')} {datos.get('Primer Apellido', '')} {datos.get('Segundo Apellido', '')}".strip()
-    pdf.set_font("Helvetica", "B", 8)
-    # Usamos multi_cell por si el nombre es largo, pero con x=58 para alinear
-    pdf.multi_cell(80, 4, nombre_completo.upper())
+    pdf.set_font("Helvetica", "B", 9)
+    pdf.multi_cell(100, 5, nombre_completo.upper()) # Aumentamos ancho a 100
     
-    # idCIF: Bajado un poco y movido a la derecha (x=72, y=79)
-    pdf.set_xy(72, 79)
+    # 3. idCIF: 3mm a la izquierda de la posición anterior (antes x=72, ahora x=69)
+    # Y lo bajamos un poco más a y=80
+    pdf.set_xy(69, 80)
     pdf.set_font("Helvetica", "B", 9)
     pdf.cell(0, 5, str(idcif_usuario)) 
 
-    # Lugar y Fecha de Emisión: Sin cambios (y=70)
+    # 4. Lugar y Fecha de Emisión: CORREGIDO A ESPAÑOL
     pdf.set_font("Helvetica", "", 7)
     pdf.set_xy(118, 70)
-    # Forzamos la fecha a ser igual a la de tu captura exitosa
-    fecha_txt = f"CUAUHTEMOC, CIUDAD DE MEXICO, A {datetime.now().strftime('%d DE %B DE %Y').upper()}"
-    pdf.cell(80, 4, fecha_txt, align='C')
+    texto_lugar = f"CUAUHTEMOC, CIUDAD DE MEXICO, A {fecha_espanol}"
+    pdf.cell(80, 4, texto_lugar, align='C')
 
-    # --- TABLA DE DATOS DE IDENTIFICACIÓN ---
+    # --- RELLENO DE TABLA DE IDENTIFICACIÓN ---
     pdf.set_font("Helvetica", "", 8)
     pdf.set_xy(43, 102.5) # RFC
     pdf.cell(0, 5, rfc_usuario)
