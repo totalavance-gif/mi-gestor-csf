@@ -2,78 +2,134 @@
 <html lang="es">
 <head>
     <meta charset="UTF-8">
-    <title>Gestor de Constancias</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Extractor de Datos SAT (Mejorado)</title>
     <style>
         body { font-family: sans-serif; padding: 20px; background: #f0f2f5; }
-        .card { background: white; padding: 20px; border-radius: 10px; max-width: 450px; margin: auto; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
-        input { width: 100%; padding: 10px; margin: 10px 0; border: 1px solid #ccc; border-radius: 5px; box-sizing: border-box; }
-        button { width: 100%; padding: 12px; border: none; border-radius: 5px; cursor: pointer; font-weight: bold; }
-        .btn-extract { background: #0071bc; color: white; }
-        .btn-pdf { background: #28a745; color: white; display: none; margin-top: 15px; }
-        .curp-box { background: #e9ecef; padding: 10px; margin: 15px 0; display: none; border-radius: 5px; text-align: center; }
-        #curp_val { font-weight: bold; color: #d63384; }
-        .copy-btn { font-size: 12px; background: #6c757d; color: white; padding: 3px 8px; border-radius: 4px; cursor: pointer; margin-left: 10px; }
+        .card { background: white; padding: 25px; border-radius: 12px; box-shadow: 0 4px 15px rgba(0,0,0,0.1); max-width: 500px; margin: auto; }
+        label { font-weight: bold; font-size: 0.9em; color: #444; }
+        input { width: 100%; padding: 12px; margin: 8px 0 15px 0; border: 1px solid #ccc; border-radius: 6px; box-sizing: border-box; font-size: 1em; }
+        
+        /* Botones Diferenciados */
+        .btn-extract { background: #007bff; color: white; border: none; padding: 12px; border-radius: 6px; cursor: pointer; width: 100%; font-weight: bold; }
+        .btn-extract:hover { background: #0056b3; }
+        .btn-pdf { background: #28a745; color: white; border: none; padding: 15px; border-radius: 6px; cursor: pointer; width: 100%; font-weight: bold; margin-top: 10px; font-size: 1.1em; }
+        .btn-pdf:hover { background: #218838; }
+        
+        button:disabled { background: #ccc !important; cursor: not-allowed; }
+
+        /* Caja de CURP para Copiar */
+        #curp-section { 
+            display: none; 
+            background: #fff3cd; 
+            border: 1px dashed #e6db55; 
+            padding: 15px; 
+            border-radius: 8px; 
+            margin: 20px 0; 
+            text-align: center;
+        }
+        .curp-display { font-family: monospace; font-size: 1.2em; font-weight: bold; color: #856404; display: block; margin-bottom: 5px; }
+        .copy-badge { background: #856404; color: white; padding: 3px 10px; border-radius: 4px; font-size: 0.7em; cursor: pointer; text-transform: uppercase; }
+
+        /* Formulario de Confirmación */
+        #final-form { display: none; border-top: 2px solid #eee; pt: 20px; margin-top: 10px; }
+        .row { display: flex; gap: 10px; }
     </style>
 </head>
 <body>
 
 <div class="card">
-    <h3>Generador de Constancia</h3>
+    <h2>Consulta de Datos Fiscales</h2>
     
-    <input type="text" id="rfc_in" placeholder="RFC">
-    <input type="text" id="idcif_in" placeholder="idCIF">
-    <button class="btn-extract" onclick="extraer()">1. EXTRAER DATOS DEL SAT</button>
+    <form id="scrapingForm">
+        <label>RFC:</label>
+        <input type="text" name="rfc" id="rfc_in" required placeholder="RFC del contribuyente" maxlength="13">
+        <label>ID CIF:</label>
+        <input type="text" name="idcif" id="idcif_in" required placeholder="ID CIF (10-11 dígitos)">
+        <button type="submit" id="btn" class="btn-extract">1. EXTRAER DEL SAT</button>
+    </form>
 
-    <div id="curp_box" class="curp-box">
-        CURP: <span id="curp_val"></span>
-        <span class="copy-btn" onclick="copiar()">COPIAR</span>
+    <div id="curp-section">
+        <label>CURP EXTRAÍDA:</label>
+        <span class="curp-display" id="curp_val"></span>
+        <span class="copy-badge" onclick="copyToClipboard()">Copiar CURP</span>
+        <p style="font-size: 0.8em; margin-top: 10px; color: #666;">Cópiala para buscar los apellidos si no aparecen abajo.</p>
     </div>
 
-    <form action="/generar_pdf" method="POST" id="form_final">
-        <input type="hidden" name="rfc" id="f_rfc">
-        <input type="hidden" name="idcif" id="f_idcif">
-        <input type="hidden" name="curp" id="f_curp">
-        
-        <label>Verifica y completa:</label>
-        <input type="text" name="nombre" id="f_nombre" placeholder="Nombre(s)" required>
-        <input type="text" name="apellido_p" placeholder="Primer Apellido" required>
-        <input type="text" name="apellido_m" placeholder="Segundo Apellido">
-        
-        <button type="submit" class="btn-pdf" id="btn_pdf">2. GENERAR PDF FINAL</button>
+    <form id="pdfForm" action="/generar_pdf" method="POST">
+        <div id="final-form">
+            <input type="hidden" name="rfc" id="f_rfc">
+            <input type="hidden" name="idcif" id="f_idcif">
+            <input type="hidden" name="curp" id="f_curp">
+            
+            <label>Nombre(s):</label>
+            <input type="text" name="nombre" id="f_nombre" required>
+            
+            <div class="row">
+                <div style="flex:1">
+                    <label>Apellido Paterno:</label>
+                    <input type="text" name="apellido_p" required placeholder="Obligatorio">
+                </div>
+                <div style="flex:1">
+                    <label>Apellido Materno:</label>
+                    <input type="text" name="apellido_m" placeholder="Opcional">
+                </div>
+            </div>
+
+            <button type="submit" class="btn-pdf">2. GENERAR CONSTANCIA PDF</button>
+        </div>
     </form>
 </div>
 
 <script>
-async function extraer() {
-    const rfc = document.getElementById('rfc_in').value;
-    const idcif = document.getElementById('idcif_in').value;
-    
-    const fd = new FormData();
-    fd.append('rfc', rfc);
-    fd.append('idcif', idcif);
+    const form = document.getElementById('scrapingForm');
+    const btn = document.getElementById('btn');
+    const curpSection = document.getElementById('curp-section');
+    const finalForm = document.getElementById('final-form');
 
-    const res = await fetch('/extraer_sat', { method: 'POST', body: fd });
-    const data = await res.json();
+    form.onsubmit = async (e) => {
+        e.preventDefault();
+        btn.disabled = true;
+        btn.innerText = "Conectando al SAT...";
 
-    if(data.status === 'success') {
-        document.getElementById('curp_val').innerText = data.curp;
-        document.getElementById('f_curp').value = data.curp;
-        document.getElementById('f_rfc').value = data.rfc;
-        document.getElementById('f_idcif').value = idcif;
-        document.getElementById('f_nombre').value = data.nombre;
+        const formData = new FormData(form);
+        try {
+            const response = await fetch('/extraer_sat', {
+                method: 'POST',
+                body: formData
+            });
+            
+            const data = await response.json();
+            
+            if(data.status === "success") {
+                // Llenamos los campos visibles e invisibles
+                document.getElementById('curp_val').innerText = data.curp;
+                document.getElementById('f_curp').value = data.curp;
+                document.getElementById('f_rfc').value = data.rfc;
+                document.getElementById('f_idcif').value = document.getElementById('idcif_in').value;
+                document.getElementById('f_nombre').value = data.nombre;
 
-        document.getElementById('curp_box').style.display = 'block';
-        document.getElementById('btn_pdf').style.display = 'block';
-    } else {
-        alert("Error: " + data.message);
+                // Mostramos las secciones ocultas
+                curpSection.style.display = 'block';
+                finalForm.style.display = 'block';
+            } else {
+                alert("Error: " + data.message);
+            }
+        } catch (err) {
+            alert("Error de conexión con el servidor");
+        } finally {
+            btn.disabled = false;
+            btn.innerText = "1. EXTRAER DEL SAT";
+        }
+    };
+
+    function copyToClipboard() {
+        const text = document.getElementById('curp_val').innerText;
+        navigator.clipboard.writeText(text).then(() => {
+            alert("CURP copiada al portapapeles");
+        });
     }
-}
-
-function copiar() {
-    const val = document.getElementById('curp_val').innerText;
-    navigator.clipboard.writeText(val);
-    alert("CURP Copiada al portapapeles");
-}
 </script>
+
 </body>
 </html>
