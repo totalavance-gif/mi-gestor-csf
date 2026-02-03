@@ -5,7 +5,6 @@ from bs4 import BeautifulSoup
 import urllib3
 import ssl
 import io
-import re
 from reconstructor import generar_constancia_pdf
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
@@ -21,83 +20,56 @@ class SSLAdapter(requests.adapters.HTTPAdapter):
         kwargs['ssl_context'] = ctx
         return super(SSLAdapter, self).init_poolmanager(*args, **kwargs)
 
-# --- SCRAPER GRATUITO DE CURP ---
-def scraper_curp_gratis(curp):
-    """
-    Intenta extraer el nombre completo usando un servicio de consulta pública.
-    """
-    try:
-        # Intentamos con un endpoint de consulta rápida (ejemplo de integración con portal de datos)
-        # Nota: Los scrapers de CURP son sensibles a cambios en los portales de gobierno.
-        url = f"https://www.gob.mx/curp/" # Portal base para referencia
-        
-        # Simulamos la obtención de datos (Lógica de extracción)
-        # En entornos de producción, aquí se usaría Selenium o un request a un API Gateway abierto.
-        # Por seguridad y estabilidad, si el scraper externo no responde, 
-        # implementamos una lógica de 'reconstrucción' por iniciales de CURP.
-        
-        if len(curp) == 18:
-            # La CURP tiene: 1ra letra Apellido1, 1ra vocal Apellido1, 1ra letra Apellido2, 1ra letra Nombre
-            return {
-                "nombres": "VERIFICAR EN ACTA", 
-                "apellido1": curp[0:2], # Mostramos las iniciales para guiar al usuario
-                "apellido2": curp[2]
-            }
-    except:
-        return None
-    return None
-
-@app.route('/')
-def home():
-    return render_template('index.html')
-
-@app.route('/generar', methods=['POST'])
-def generar():
+# --- PASO 1: EXTRAER DATOS Y DEVOLVER CURP ---
+@app.route('/extraer_sat', methods=['POST'])
+def extraer_sat():
     try:
         rfc = request.form.get('rfc', '').upper().strip()
         idcif = request.form.get('idcif', '').strip()
 
-        # 1. Extracción SAT
         validador_url = f"https://siat.sat.gob.mx/app/qr/faces/pages/mobile/validadorqr.jsf?D1=10&D2=1&D3={idcif}_{rfc}"
+        
         session = requests.Session()
         session.mount('https://', SSLAdapter())
-        headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36...'}
+        headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'}
+
+        response = session.get(validador_url, headers=headers, timeout=15, verify=False)
         
-        res_sat = session.get(validador_url, headers=headers, timeout=15, verify=False)
-        soup = BeautifulSoup(res_sat.text, 'html.parser')
+        if response.status_code == 200:
+            soup = BeautifulSoup(response.text, 'html.parser')
+            datos_raw = {}
+            for row in soup.find_all('tr'):
+                cols = row.find_all('td')
+                if len(cols) >= 2:
+                    llave = cols[0].text.strip().replace(':', '').replace('.', '')
+                    datos_raw[llave] = cols[1].text.strip()
+
+            # Enviamos los datos para que el index.html los muestre en los inputs
+            return jsonify({
+                "status": "success",
+                "curp_encontrada": datos_raw.get('CURP', ''),
+                "nombre_sat": datos_raw.get('Nombre (s)', datos_raw.get('Nombre', '')).upper(),
+                "rfc": rfc,
+                "mensaje": "CURP extraída. Cópiala para buscar los apellidos si es necesario."
+            })
         
-        datos_raw = {}
-        for row in soup.find_all('tr'):
-            cols = row.find_all('td')
-            if len(cols) >= 2:
-                llave = cols[0].text.strip().replace(':', '').replace('.', '')
-                datos_raw[llave] = cols[1].text.strip()
+        return jsonify({"status": "error", "message": "El SAT no respondió. Verifica RFC e idCIF."}), 503
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)}), 500
 
-        curp_extraida = datos_raw.get('CURP', '')
-        nombre_sat = datos_raw.get('Nombre (s)', datos_raw.get('Nombre', 'KAREN')).upper()
-
-        # 2. Ejecutar Scraper de CURP para Apellidos
-        p_apellido = datos_raw.get('Primer Apellido', '')
-        s_apellido = datos_raw.get('Segundo Apellido', '')
-
-        if not p_apellido and curp_extraida:
-            res_curp = scraper_curp_gratis(curp_extraida)
-            if res_curp:
-                # Si el scraper no trae el nombre completo, al menos preparamos el campo
-                p_apellido = p_apellido if p_apellido else "PENDIENTE"
-                s_apellido = s_apellido if s_apellido else "VERIFICAR"
-
-        # 3. Datos Finales para el PDF
+# --- PASO 2: GENERAR EL PDF FINAL CON LOS DATOS MANUALES ---
+@app.route('/generar_pdf', methods=['POST'])
+def generar_pdf():
+    try:
+        # Aquí recibimos lo que el usuario ya validó o escribió
         datos_finales = {
-            "Nombre (s)": nombre_sat,
-            "Primer Apellido": p_apellido.upper() if p_apellido else "APELLIDO_P",
-            "Segundo Apellido": s_apellido.upper() if s_apellido else "APELLIDO_M",
-            "CURP": curp_extraida,
-            "Fecha inicio de operaciones": datos_raw.get('Fecha inicio de operaciones', '01 DE ENERO DE 2015'),
-            "Estatus en el padrón": datos_raw.get('Estatus en el padrón', 'ACTIVO'),
-            "Fecha de último cambio de estado": datos_raw.get('Fecha de último cambio de estado', '01 DE ENERO DE 2015'),
-            # Domicilio automático
-            "Código Postal": datos_raw.get('Código Postal', '06300'),
+            "Nombre (s)": request.form.get('nombre', '').upper(),
+            "Primer Apellido": request.form.get('apellido_p', '').upper(),
+            "Segundo Apellido": request.form.get('apellido_m', '').upper(),
+            "CURP": request.form.get('curp', '').upper(),
+            "RFC": request.form.get('rfc', '').upper(),
+            # Domicilio automatizado (con coordenadas corregidas)
+            "Código Postal": request.form.get('cp', '06300'),
             "Tipo de Vialidad": "CALLE",
             "Nombre de Vialidad": "AV. HIDALGO",
             "Número Exterior": "77",
@@ -106,18 +78,22 @@ def generar():
             "Nombre de la Entidad Federativa": "CIUDAD DE MEXICO"
         }
 
-        pdf_stream = generar_constancia_pdf(datos_finales, rfc, idcif, validador_url)
+        rfc = datos_finales["RFC"]
+        idcif = request.form.get('idcif', '')
+        url_sat = f"https://siat.sat.gob.mx/app/qr/faces/pages/mobile/validadorqr.jsf?D1=10&D2=1&D3={idcif}_{rfc}"
+
+        # Llamamos al reconstructor (asegúrate de que tenga las coordenadas de domicilio bajadas)
+        pdf_stream = generar_constancia_pdf(datos_finales, rfc, idcif, url_sat)
         
         return send_file(
             pdf_stream,
             mimetype='application/pdf',
             as_attachment=True,
-            download_name=f'Constancia_{rfc}.pdf'
+            download_name=f'CSF_{rfc}.pdf'
         )
-
     except Exception as e:
-        return f"Error: {str(e)}", 500
+        return f"Error en generación: {str(e)}", 500
 
 if __name__ == '__main__':
     app.run(debug=True)
-    
+        
