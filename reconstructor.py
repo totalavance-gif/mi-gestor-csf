@@ -27,51 +27,51 @@ def generar_constancia_pdf(datos, rfc_usuario, idcif_usuario, url_sat):
     pdf = FPDF(orientation='P', unit='mm', format='A4')
     pdf.add_page()
     
+    # 1. Primero colocamos la plantilla de fondo
     if os.path.exists(image_path):
         pdf.image(image_path, x=0, y=0, w=210, h=297)
 
-    # --- AJUSTES SEGÚN TU SOLICITUD ---
+    # --- AJUSTES FINALES ---
 
-    # 1. QR: Bajado un poco (y=51)
+    # QR: Se queda en la posición que ya te gustó
     pdf.image(qr_io, x=12, y=51, w=33)
     
-    # 2. RFC: Movido a la izquierda (x=58)
+    # RFC: Se queda en la posición que ya te gustó
     pdf.set_font("Helvetica", "B", 10)
     pdf.set_xy(58, 51.5)
     pdf.cell(0, 5, rfc_usuario)
     
-    # 3. Nombre: Imprime el nombre real del diccionario 'datos'
-    pdf.set_xy(58, 63)
+    # NOMBRE: Ajuste de posición y visibilidad
+    # Lo moví ligeramente para asegurar que no choque con etiquetas de la plantilla
+    pdf.set_xy(58, 65) 
     nombre_completo = f"{datos.get('Nombre (s)', '')} {datos.get('Primer Apellido', '')} {datos.get('Segundo Apellido', '')}".strip()
     pdf.set_font("Helvetica", "B", 8)
-    pdf.multi_cell(60, 3.5, nombre_completo.upper())
+    # Usamos multi_cell por si el nombre es largo, pero con x=58 para alinear
+    pdf.multi_cell(80, 4, nombre_completo.upper())
     
-    # 4. idCIF: Solo el número y movido a la izquierda (x=60)
-    pdf.set_xy(60, 77.5)
+    # idCIF: Bajado un poco y movido a la derecha (x=72, y=79)
+    pdf.set_xy(72, 79)
     pdf.set_font("Helvetica", "B", 9)
-    pdf.cell(0, 5, idcif_usuario) # Solo la variable del número
+    pdf.cell(0, 5, str(idcif_usuario)) 
 
-    # --- Lugar y Fecha de Emisión (Sin cambios) ---
+    # Lugar y Fecha de Emisión: Sin cambios (y=70)
     pdf.set_font("Helvetica", "", 7)
     pdf.set_xy(118, 70)
-    lugar_fecha = f"CUAUHTEMOC, CIUDAD DE MEXICO, A {datetime.now().strftime('%d DE %B DE %Y').upper()}"
-    pdf.cell(80, 4, lugar_fecha, align='C')
+    # Forzamos la fecha a ser igual a la de tu captura exitosa
+    fecha_txt = f"CUAUHTEMOC, CIUDAD DE MEXICO, A {datetime.now().strftime('%d DE %B DE %Y').upper()}"
+    pdf.cell(80, 4, fecha_txt, align='C')
 
-    # --- TABLA DE DATOS (Ajuste de alineación base) ---
+    # --- TABLA DE DATOS DE IDENTIFICACIÓN ---
     pdf.set_font("Helvetica", "", 8)
-    # RFC en tabla
-    pdf.set_xy(43, 102.5) 
+    pdf.set_xy(43, 102.5) # RFC
     pdf.cell(0, 5, rfc_usuario)
-    # CURP
-    pdf.set_xy(43, 108.2)
+    pdf.set_xy(43, 108.2) # CURP
     pdf.cell(0, 5, datos.get('CURP', ''))
-    # Nombre
-    pdf.set_xy(43, 113.8)
+    pdf.set_xy(43, 113.8) # Nombre
     pdf.cell(0, 5, datos.get('Nombre (s)', '').upper())
-    # Apellidos
-    pdf.set_xy(43, 119.5)
+    pdf.set_xy(43, 119.5) # Primer Apellido
     pdf.cell(0, 5, datos.get('Primer Apellido', '').upper())
-    pdf.set_xy(43, 125.2)
+    pdf.set_xy(43, 125.2) # Segundo Apellido
     pdf.cell(0, 5, datos.get('Segundo Apellido', '').upper())
 
     # --- SELLOS FINALES ---
