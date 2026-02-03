@@ -3,174 +3,60 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Extractor y Generador de Constancias SAT</title>
+    <title>Extractor de Datos SAT (Base)</title>
     <style>
-        :root {
-            --primary: #007bff;
-            --success: #28a745;
-            --warning: #ffc107;
-            --dark: #343a40;
-        }
-        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; padding: 20px; background: #f0f2f5; color: #333; }
-        .card { background: white; padding: 25px; border-radius: 12px; box-shadow: 0 4px 15px rgba(0,0,0,0.1); max-width: 500px; margin: auto; }
-        h2 { text-align: center; color: var(--dark); margin-bottom: 25px; font-size: 1.5em; }
-        
-        label { font-weight: 600; font-size: 0.9em; color: #555; display: block; margin-top: 10px; }
-        input { width: 100%; padding: 12px; margin: 8px 0; border: 1px solid #ddd; border-radius: 6px; box-sizing: border-box; font-size: 1em; transition: 0.3s; }
-        input:focus { border-color: var(--primary); outline: none; box-shadow: 0 0 5px rgba(0,123,255,0.2); }
-        
-        button { width: 100%; padding: 12px; border: none; border-radius: 6px; cursor: pointer; font-weight: bold; font-size: 1em; transition: 0.3s; margin-top: 10px; }
-        .btn-extract { background: var(--primary); color: white; }
-        .btn-extract:hover { background: #0056b3; }
-        .btn-extract:disabled { background: #ccc; cursor: not-allowed; }
-
-        .btn-pdf { background: var(--success); color: white; margin-top: 15px; display: none; }
-        .btn-pdf:hover { background: #218838; }
-
-        /* Zona de CURP extraída */
-        #curp-section { 
-            display: none; 
-            background: #fff3cd; 
-            border: 1px dashed #e6db55; 
-            padding: 15px; 
-            border-radius: 8px; 
-            margin: 20px 0; 
-            text-align: center;
-        }
-        .curp-display { font-family: 'Courier New', Courier, monospace; font-size: 1.3em; font-weight: bold; color: #856404; display: block; margin-bottom: 8px; }
-        .copy-badge { background: #856404; color: white; padding: 4px 12px; border-radius: 4px; font-size: 0.75em; cursor: pointer; border: none; }
-        .copy-badge:active { transform: scale(0.95); }
-
-        /* Formulario de Confirmación */
-        #final-form { display: none; border-top: 2px solid #eee; margin-top: 20px; padding-top: 15px; }
-        .row { display: flex; gap: 10px; }
-        .helper-text { font-size: 0.8em; color: #666; margin-top: 5px; line-height: 1.4; }
+        body { font-family: sans-serif; padding: 20px; background: #f0f2f5; }
+        .card { background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); max-width: 500px; margin: auto; }
+        input { width: 100%; padding: 10px; margin: 10px 0; border: 1px solid #ccc; border-radius: 4px; box-sizing: border-box; }
+        button { width: 100%; padding: 10px; background: #007bff; color: white; border: none; border-radius: 4px; cursor: pointer; }
+        button:disabled { background: #ccc; }
+        #json-result { margin-top: 20px; background: #272822; color: #f8f8f2; padding: 15px; border-radius: 5px; overflow-x: auto; font-family: monospace; display: none; }
     </style>
 </head>
 <body>
 
 <div class="card">
     <h2>Consulta de Datos Fiscales</h2>
-    
     <form id="scrapingForm">
-        <label for="rfc_in">RFC del Contribuyente:</label>
-        <input type="text" name="rfc" id="rfc_in" required placeholder="Ej: ABCD123456XYZ" maxlength="13" style="text-transform: uppercase;">
-        
-        <label for="idcif_in">ID CIF:</label>
-        <input type="text" name="idcif" id="idcif_in" required placeholder="Número de 10-11 dígitos">
-        
-        <button type="submit" id="btn-extract" class="btn-extract">1. EXTRAER DATOS DEL SAT</button>
+        <label>RFC:</label>
+        <input type="text" name="rfc" required placeholder="RFC del contribuyente">
+        <label>ID CIF:</label>
+        <input type="text" name="idcif" required placeholder="ID CIF (10-11 dígitos)">
+        <button type="submit" id="btn">Consultar Datos</button>
     </form>
 
-    <div id="curp-section">
-        <label>CURP ENCONTRADA:</label>
-        <span class="curp-display" id="curp_val"></span>
-        <button type="button" class="copy-badge" onclick="copyToClipboard()">Copiar CURP</button>
-        <p class="helper-text">Usa esta CURP para buscar los apellidos en el portal oficial si no se cargan automáticamente.</p>
-    </div>
-
-    <form id="pdfForm" action="/generar_pdf" method="POST">
-        <div id="final-form">
-            <input type="hidden" name="rfc" id="f_rfc">
-            <input type="hidden" name="idcif" id="f_idcif">
-            <input type="hidden" name="curp" id="f_curp">
-            
-            <label for="f_nombre">Nombre(s):</label>
-            <input type="text" name="nombre" id="f_nombre" required placeholder="Ej: KAREN">
-            
-            <div class="row">
-                <div style="flex:1">
-                    <label for="f_ape1">Apellido Paterno:</label>
-                    <input type="text" name="apellido_p" id="f_ape1" required placeholder="Obligatorio">
-                </div>
-                <div style="flex:1">
-                    <label for="f_ape2">Apellido Materno:</label>
-                    <input type="text" name="apellido_m" id="f_ape2" placeholder="Opcional">
-                </div>
-            </div>
-
-            <p class="helper-text">Revisa que el nombre coincida exactamente con la identificación oficial antes de generar.</p>
-            <button type="submit" class="btn-pdf" id="btn-generate">2. GENERAR CONSTANCIA PDF</button>
-        </div>
-    </form>
+    <pre id="json-result"></pre>
 </div>
 
 <script>
-    const scrapingForm = document.getElementById('scrapingForm');
-    const btnExtract = document.getElementById('btn-extract');
-    const curpSection = document.getElementById('curp-section');
-    const finalForm = document.getElementById('final-form');
-    const btnGenerate = document.getElementById('btn-generate');
+    const form = document.getElementById('scrapingForm');
+    const resultBox = document.getElementById('json-result');
+    const btn = document.getElementById('btn');
 
-    scrapingForm.onsubmit = async (e) => {
+    form.onsubmit = async (e) => {
         e.preventDefault();
-        
-        // Estado de carga
-        btnExtract.disabled = true;
-        btnExtract.innerText = "Conectando con el SAT...";
-        curpSection.style.display = 'none';
-        finalForm.style.display = 'none';
+        btn.disabled = true;
+        btn.innerText = "Consultando...";
+        resultBox.style.display = 'none';
 
-        const formData = new FormData(scrapingForm);
-        
+        const formData = new FormData(form);
         try {
-            // Llamada al endpoint de extracción
-            const response = await fetch('/extraer_sat', {
+            const response = await fetch('/generar', {
                 method: 'POST',
                 body: formData
             });
             
             const data = await response.json();
-            
-            if(data.status === "success") {
-                // Poblamos los datos recibidos
-                document.getElementById('curp_val').innerText = data.curp;
-                document.getElementById('f_curp').value = data.curp;
-                document.getElementById('f_rfc').value = data.rfc;
-                document.getElementById('f_idcif').value = document.getElementById('idcif_in').value;
-                document.getElementById('f_nombre').value = data.nombre;
-
-                // Mostramos las secciones ocultas
-                curpSection.style.display = 'block';
-                finalForm.style.display = 'block';
-                btnGenerate.style.display = 'block';
-            } else {
-                alert("Error del SAT: " + (data.message || "No se encontraron datos. Revisa el ID CIF."));
-            }
+            resultBox.innerText = JSON.stringify(data, null, 2);
+            resultBox.style.display = 'block';
         } catch (err) {
-            console.error(err);
-            alert("Error crítico de comunicación con el servidor.");
+            alert("Error al conectar con el servidor");
         } finally {
-            btnExtract.disabled = false;
-            btnExtract.innerText = "1. EXTRAER DATOS DEL SAT";
+            btn.disabled = false;
+            btn.innerText = "Consultar Datos";
         }
     };
-
-    function copyToClipboard() {
-        const text = document.getElementById('curp_val').innerText;
-        if (!text) return;
-        
-        navigator.clipboard.writeText(text).then(() => {
-            const badge = document.querySelector('.copy-badge');
-            const originalText = badge.innerText;
-            badge.innerText = "¡COPIADO!";
-            badge.style.background = "#28a745";
-            
-            setTimeout(() => {
-                badge.innerText = originalText;
-                badge.style.background = "#856404";
-            }, 2000);
-        }).catch(err => {
-            alert("No se pudo copiar automáticamente. Por favor selecciónalo manualmente.");
-        });
-    }
-
-    // Convertir RFC a mayúsculas automáticamente
-    document.getElementById('rfc_in').addEventListener('input', function(e) {
-        this.value = this.value.toUpperCase();
-    });
 </script>
 
 </body>
-            </html>
-    
+</html>
