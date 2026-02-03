@@ -1,30 +1,30 @@
-from flask import Flask, request, jsonify, render_template, send_file
-from flask_cors import CORS
+from flask import Flask, render_template, request, jsonify, send_file
 import requests
 from bs4 import BeautifulSoup
-import urllib3
 import ssl
-from reconstructor import generar_constancia_pdf
+import urllib3
+from reconstructor import generar_constancia_pdf # Tu script de PDF
 
+# Desactiva alertas de seguridad
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 app = Flask(__name__)
-CORS(app)
 
-# Parche crítico para el error 'dh key too small' de tus capturas
+# --- PARCHE PARA ERROR DH_KEY_TOO_SMALL ---
 class SSLAdapter(requests.adapters.HTTPAdapter):
     def init_poolmanager(self, *args, **kwargs):
-        ctx = ssl.create_default_context()
-        ctx.set_ciphers('DEFAULT@SECLEVEL=1')
-        kwargs['ssl_context'] = ctx
+        context = ssl.create_default_context()
+        # Bajamos el nivel de seguridad solo para esta conexión (Nivel 1)
+        context.set_ciphers('DEFAULT@SECLEVEL=1')
+        kwargs['ssl_context'] = context
         return super(SSLAdapter, self).init_poolmanager(*args, **kwargs)
 
 @app.route('/')
-def home():
+def index():
     return render_template('index.html')
 
 @app.route('/extraer_sat', methods=['POST'])
-def extraer_sat():
+def extraer():
     try:
         rfc = request.form.get('rfc', '').upper().strip()
         idcif = request.form.get('idcif', '').strip()
@@ -32,6 +32,7 @@ def extraer_sat():
         
         session = requests.Session()
         session.mount('https://', SSLAdapter())
+        # Realizamos la petición con el parche SSL
         r = session.get(url, timeout=15, verify=False)
         
         soup = BeautifulSoup(r.text, 'html.parser')
@@ -50,20 +51,4 @@ def extraer_sat():
         })
     except Exception as e:
         return jsonify({"status": "error", "message": str(e)})
-
-@app.route('/generar_pdf', methods=['POST'])
-def generar_pdf():
-    datos = {
-        "Nombre (s)": request.form.get('nombre', '').upper(),
-        "Primer Apellido": request.form.get('apellido_p', '').upper(),
-        "Segundo Apellido": request.form.get('apellido_m', '').upper(),
-        "CURP": request.form.get('curp', '').upper(),
-        "RFC": request.form.get('rfc', '').upper()
-    }
-    rfc = datos["RFC"]
-    idcif = request.form.get('idcif')
-    url_sat = f"https://siat.sat.gob.mx/app/qr/faces/pages/mobile/validadorqr.jsf?D1=10&D2=1&D3={idcif}_{rfc}"
-    
-    pdf_stream = generar_constancia_pdf(datos, rfc, idcif, url_sat)
-    return send_file(pdf_stream, mimetype='application/pdf', as_attachment=True, download_name=f'CSF_{rfc}.pdf')
-                                             
+        
